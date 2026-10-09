@@ -973,7 +973,7 @@ describe('desktop main startup', () => {
     expect(() => handler(event, 'application', NaN, 34)).toThrow('invalid popup request')
     const application = handler(event, 'application', 48, 34)
     expect(harness.menu.buildFromTemplate.mock.lastCall![0].map(item => item.label ?? item.type)).toEqual([
-      '关于 DeepSeek Harness', 'separator', '检查更新…', '管理 dsh 命令…', 'separator', '退出',
+      '关于 DeepSeek Harness', 'separator', '检查更新…', '管理 dsh 命令…', '重启应用与 Host', 'separator', '退出',
     ])
     expect(harness.popup.mock.lastCall![0]).toMatchObject({ window, x: 48, y: 34 })
     expect(harness.popup.mock.lastCall![0].callback).toBeTypeOf('function')
@@ -1010,8 +1010,8 @@ describe('desktop main startup', () => {
       : ['Application', 'editMenu'])
     const application = template[0]!.submenu as MenuItemConstructorOptions[]
     expect(application.filter(item => item.visible !== false).map(describeItem)).toEqual(platform === 'darwin'
-      ? ['about', 'separator', en.checkUpdatesMenu, en.cliCommandMenu, 'separator', 'hide', 'hideOthers', 'unhide', 'separator', 'quit']
-      : ['about', 'separator', en.checkUpdatesMenu, 'separator', 'quit'])
+      ? ['about', 'separator', en.checkUpdatesMenu, en.cliCommandMenu, en.restartAppHostMenu, 'separator', 'hide', 'hideOthers', 'unhide', 'separator', 'quit']
+      : ['about', 'separator', en.checkUpdatesMenu, en.restartAppHostMenu, 'separator', 'quit'])
     expect(harness.menu.setApplicationMenu).toHaveBeenCalledOnce()
   })
 
@@ -1392,8 +1392,8 @@ describe('desktop main startup', () => {
     await harness.quitCompleted.promise
   })
 
-  it('warns about running tasks when the inspection fails and quits directly on session end or a development restart', async () => {
-    harness.app.isPackaged = false
+  it.each([true, false])('warns when quit inspection fails but restarts without confirmation (packaged=%s)', async (packaged) => {
+    harness.app.isPackaged = packaged
     const host = await readyWorkspace()
     host.inspectQuit.mockRejectedValue(new Error('desktop quit: inspection timed out'))
     harness.dialog.showMessageBox.mockResolvedValue({ response: 1, checkboxChecked: false })
@@ -1410,6 +1410,23 @@ describe('desktop main startup', () => {
     await host.stopping.promise
     host.exited.resolve()
     await harness.quitCompleted.promise
+  })
+
+  it.each(
+    (['darwin', 'win32'] as const).flatMap(platform =>
+      [true, false].flatMap(packaged => ['en-US', 'zh-CN'].map(locale => ({ platform, packaged, locale })))),
+  )('shows restart in the application menu ($platform, packaged=$packaged, $locale)', async ({ platform, packaged, locale }) => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue(platform)
+    harness.app.isPackaged = packaged
+    vi.spyOn(harness.app, 'getLocale').mockReturnValue(locale)
+    vi.spyOn(harness.app, 'getPreferredSystemLanguages').mockReturnValue([locale])
+    await readyWorkspace()
+    const messages = locale === 'zh-CN' ? zh : en
+    const items = applicationMenuItems()
+    expect(items.filter(item => item.label === messages.restartAppHostMenu)).toHaveLength(1)
+    expect(items.some(item => item.role === 'reload')).toBe(!packaged)
+    const output = items.map(item => item.type === 'separator' ? '---' : item.label ?? item.role).join('\n') + '\n'
+    await expect(output).toMatchFileSnapshot(`expected/restart-menu/${platform}-${packaged ? 'packaged' : 'development'}-${locale}.txt`)
   })
 
   it('does not block a Windows session end on the quit confirmation', async () => {

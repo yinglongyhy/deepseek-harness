@@ -67,7 +67,7 @@ let stopForRecovery = async (): Promise<void> => {}
 let shuttingDown = false
 /**
  * Set by quit entries that must not ask: crash recovery exit and restart, and the
- * development restart command. The installer handoff has its own before-quit branch.
+ * application restart command. The installer handoff has its own before-quit branch.
  */
 let skipQuitConfirmation = false
 let windowsLanguage: string | undefined
@@ -965,12 +965,12 @@ async function main(): Promise<void> {
     ...development ? [
       { type: 'separator' as const },
       { label: currentDesktopLocale().messages.reloadPageMenu, role: 'reload' as const },
-      { label: currentDesktopLocale().messages.restartAppHostMenu, click: () => {
-        if (quitting) return
-        app.relaunch()
-        quitWithoutConfirmation()
-      } },
     ] : [],
+    { label: currentDesktopLocale().messages.restartAppHostMenu, click: () => {
+      if (quitting) return
+      app.relaunch()
+      quitWithoutConfirmation()
+    } },
     { type: 'separator' },
     ...hideCommands,
     { role: 'quit', ...(darwin ? { label: currentDesktopLocale().messages.quitApplication }

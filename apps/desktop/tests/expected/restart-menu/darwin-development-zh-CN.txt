@@ -1,0 +1,15 @@
+关于 DeepSeek Harness
+---
+检查更新…
+管理 dsh 命令…
+---
+刷新页面
+重启应用与 Host
+---
+隐藏 DeepSeek Harness
+隐藏其他
+显示全部
+---
+退出 DeepSeek Harness
+toggleDevTools
+toggleDevTools

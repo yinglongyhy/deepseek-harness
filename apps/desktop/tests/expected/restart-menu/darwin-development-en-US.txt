@@ -1,0 +1,15 @@
+About DeepSeek Harness
+---
+Check for Updates…
+Manage dsh Command…
+---
+Reload Page
+Restart App and Host
+---
+Hide DeepSeek Harness
+Hide Others
+Show All
+---
+Quit DeepSeek Harness
+toggleDevTools
+toggleDevTools

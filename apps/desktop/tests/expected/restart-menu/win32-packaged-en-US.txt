@@ -1,0 +1,7 @@
+About DeepSeek Harness
+---
+Check for Updates…
+Manage dsh Command…
+Restart App and Host
+---
+Exit
