@@ -120,6 +120,14 @@ Before pushing, follow [dsh-pre-push-checks](.agents/skills/dsh-pre-push-checks/
 - Develop with `build:artifacts`; before claiming completion, run `build:check` after the latest `build:artifacts`, or `build` ([layout](docs/development.md#typescript-project-layout)).
 - **Web browser automation and GIF recording:** launch with `pnpm dsh web --patch apps/web/tests/pin-browse-picker.overlay.yml` to use the [in-page directory picker](apps/web/tests/pin-browse-picker.overlay.yml); omit this override only when testing native picker behavior explicitly.
 
+## Git 提交
+
+- 仅在用户明确授权时暂存或提交；请求撰写提交说明不代表授权执行提交。
+- 提交信息统一使用 Conventional Commits：英文类型前缀、可选英文 scope、简洁中文标题。标题使用动词短语描述实际变化，避免模糊总结和开发过程叙述。
+- 正文以中文为主，保留必要的英文标识符、路径与命令。简单修改可省略正文；复杂修改说明动机、关键行为或兼容性影响，以及必要的验证情况，不复制完整日志或罗列修改文件。
+- 提交前检查差异，仅包含本次授权的变更，不顺带提交其他工作。
+- 不擅自修改已有提交、推送或强制推送。
+
 ## Secrets / .env
 
 Windows packaging/signing: [required reading](apps/desktop/windows-signing/README.md).
