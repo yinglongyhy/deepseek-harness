@@ -17,6 +17,7 @@ import {
   nativeTheme,
   net,
   protocol,
+  screen,
   session,
   shell,
   type IpcMainInvokeEvent,
@@ -61,6 +62,9 @@ import { DesktopUpdateOverlays } from './update-overlay.ts'
 import { DesktopQuitConfirmation } from './quit-confirmation.ts'
 import { DesktopTray } from './tray.ts'
 import { DesktopBackgroundNotice } from './background-notice.ts'
+import { DesktopDisplayMemory } from './display-memory.ts'
+
+const MAIN_WINDOW_SIZE = { width: 1280, height: 820 }
 
 let focusPrimaryWindow = (): void => {}
 let stopForRecovery = async (): Promise<void> => {}
@@ -205,10 +209,10 @@ function platformLoginUrl(authorizeUrl: string): string {
   return url.href
 }
 
-function createWindow(preload: string, show = false, primary = false): BrowserWindow {
+function createWindow(preload: string, position?: { x: number; y: number }, show = false, primary = false): BrowserWindow {
   const window = new BrowserWindow({
-    width: 1280,
-    height: 820,
+    ...MAIN_WINDOW_SIZE,
+    ...position,
     minWidth: 520,
     minHeight: 600,
     show,
@@ -315,6 +319,8 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
 }
 
 async function main(): Promise<void> {
+  const displayMemory = new DesktopDisplayMemory(join(app.getPath('userData'), 'window-display.json'))
+  await displayMemory.load()
   const desktopSettings = readDesktopSettings(app.getPath('userData'))
   void pruneCrashReports(app.getPath('logs'))
   const journalDirectory = process.env.DSH_DESKTOP_UPDATE_JOURNAL_DIR
@@ -627,6 +633,7 @@ async function main(): Promise<void> {
         // The backend's async cleanup callback can assign this after the reset above.
         const stopFailure = updateStopFailure as DesktopHostUncleanExitError | undefined
         if (stopFailure !== undefined) throw new DesktopUpdatePreparationError('stop-failed', locale.messages.updateStopFailed, stopFailure.message)
+        await displayMemory.flush()
         updateJournal?.action('install-confirmed')
         shellInstallerOwnsQuit = true
       } catch (error) {
@@ -1070,7 +1077,19 @@ async function main(): Promise<void> {
     }
   }
   const createMainWindow = (): BrowserWindow => {
-    const window = createWindow(appPreload, false, true)
+    // Creation-time layout keeps OS-driven moves after reconfiguration from accepting a new layout.
+    const displays = screen.getAllDisplays()
+    const primaryId = screen.getPrimaryDisplay().id
+    const position = displayMemory.position(displays, primaryId, MAIN_WINDOW_SIZE)
+    const window = createWindow(appPreload, position, false, true)
+    const rememberDisplay = (): void => {
+      if (quitting || shellInstallerOwnsQuit || requireCleanStop || sessionEnding || shuttingDown
+        || window.isDestroyed() || !window.isVisible() || window.isMinimized()) return
+      void displayMemory.remember(displays, primaryId, screen.getDisplayMatching(window.getBounds()).id)
+    }
+    window.on('show', rememberDisplay)
+    window.on('move', rememberDisplay)
+    window.on('resize', rememberDisplay)
     mainWindow = window
     browserGuests.bind(window, (guest, name) => shortcuts.attachGuest(window, guest, name))
     shortcuts.attach(window)
@@ -1261,7 +1280,8 @@ async function main(): Promise<void> {
     void Promise.all([Promise.resolve(mandatoryPolicy?.dispose()).then(() => policyAuth?.dispose()), backend.close(),
       // A Platform cleanup failure is logged without cutting the remaining Host shutdown short.
       platformView.dispose().catch((error: unknown) => { console.error(error) })])
-      .catch((error: unknown) => { console.error(error) }).finally(() => { app.quit() })
+      .catch((error: unknown) => { console.error(error) })
+      .then(() => displayMemory.flush()).finally(() => { app.quit() })
   }
   app.on('before-quit', (event) => {
     if (shellInstallerOwnsQuit) {

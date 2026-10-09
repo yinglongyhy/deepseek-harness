@@ -1,7 +1,7 @@
 import type { AccountView } from '@deepseek-ai/dsh-deepseek-account/types'
 import { WINDOWS_TITLEBAR_HEIGHT } from '../src/windows-layout.ts'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
-import type { IpcMainInvokeEvent } from 'electron'
+import type { BrowserWindowConstructorOptions, IpcMainInvokeEvent } from 'electron'
 import { join } from 'node:path'
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -24,6 +24,23 @@ vi.mock('../src/crash-report.ts', async importOriginal => ({
   writeCrashReport: vi.fn(async () => 'desktop-test-logs/crash-test.log'),
   pruneCrashReports: vi.fn(async () => {}),
 }))
+
+const displayFixture = vi.hoisted(() => {
+  const initial = [
+    { id: 1, bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+      workArea: { x: 0, y: 0, width: 1920, height: 1040 }, scaleFactor: 1, rotation: 0 },
+    { id: 2, bounds: { x: -1920, y: 0, width: 1920, height: 1080 },
+      workArea: { x: -1920, y: 0, width: 1920, height: 1040 }, scaleFactor: 1, rotation: 0 },
+  ]
+  const state = { initial, all: initial, primaryId: 1, matchingId: 1 }
+  return Object.assign(state, {
+    screen: {
+      getAllDisplays: () => state.all,
+      getPrimaryDisplay: () => state.all.find(display => display.id === state.primaryId)!,
+      getDisplayMatching: vi.fn(() => state.all.find(display => display.id === state.matchingId)!),
+    },
+  })
+})
 
 const harness = await vi.hoisted(async () => {
   const { EventEmitter } = await import('node:events')
@@ -276,6 +293,7 @@ vi.mock('../src/policy-test-auth.ts', () => ({ DesktopPolicyTestAuth: class {
 
 vi.mock('electron', () => ({
   app: harness.app,
+  screen: displayFixture.screen,
   BrowserWindow: harness.FakeWindow,
   dialog: harness.dialog,
   shell: { openExternal: harness.openExternal },
@@ -404,6 +422,9 @@ beforeEach(() => {
   testAuth.login.mockResolvedValue('cancelled')
   vi.useFakeTimers()
   harness.reset()
+  displayFixture.all = displayFixture.initial
+  displayFixture.primaryId = 1
+  displayFixture.matchingId = 1
   const userData = mkdtempSync(join(tmpdir(), 'dsh-main-user-data-'))
   onTestFinished(() => { rmSync(userData, { recursive: true, force: true }) })
   harness.app.getPath.mockImplementation(name => name === 'userData' ? userData : `desktop-test-${name}`)
@@ -443,6 +464,152 @@ afterEach(async () => {
 })
 
 describe('desktop main startup', () => {
+  it('loads the display preference before activation can create a main window', async () => {
+    const { DesktopDisplayMemory } = await import('../src/display-memory.ts')
+    const loading = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
+    vi.spyOn(DesktopDisplayMemory.prototype, 'load').mockImplementationOnce(async () => {
+      loading.resolve(undefined)
+      await release.promise
+    })
+    const startup = readyWorkspace()
+    try {
+      await loading.promise
+      harness.app.emit('activate', {}, false)
+      expect(harness.windows).toHaveLength(0)
+      expect(harness.hosts).toHaveLength(0)
+    } finally {
+      release.resolve(undefined)
+      await startup
+    }
+    expect(harness.windows).toHaveLength(1)
+  })
+
+  it.each(['first-launch', 'remembered-display', 'changed-layout'] as const)('uses display-only main-window placement: %s', async (scenario) => {
+    const { DesktopDisplayMemory } = await import('../src/display-memory.ts')
+    if (scenario !== 'first-launch') {
+      const memory = new DesktopDisplayMemory(join(harness.app.getPath('userData'), 'window-display.json'))
+      await memory.remember(displayFixture.all, displayFixture.primaryId, 2)
+    }
+    if (scenario === 'changed-layout') displayFixture.all = displayFixture.all.slice(0, 1)
+    await import('../src/main.ts')
+    await harness.preparing.promise
+    const options: BrowserWindowConstructorOptions = harness.windows[0]!.options
+    const placement = { width: options.width, height: options.height, minWidth: options.minWidth,
+      minHeight: options.minHeight, ...(options.x === undefined ? {} : { x: options.x, y: options.y }) }
+    const expected: unknown = JSON.parse(readFileSync(new URL('./expected/window-display.json', import.meta.url), 'utf8'))
+    expect(expected).toHaveProperty(scenario, placement)
+  })
+
+  it.each(['move', 'show', 'resize'])('remembers the visible main-window display on %s and waits for its record before quitting', async (event) => {
+    const host = await readyWorkspace()
+    const window = harness.windows[0]!
+    displayFixture.matchingId = 2
+    window.emit(event)
+    expect(displayFixture.screen.getDisplayMatching).toHaveBeenLastCalledWith(window.getBounds())
+    harness.app.quit()
+    await host.stopping.promise
+    host.exited.resolve()
+    await harness.quitCompleted.promise
+    const { DesktopDisplayMemory } = await import('../src/display-memory.ts')
+    const restored = new DesktopDisplayMemory(join(harness.app.getPath('userData'), 'window-display.json'))
+    await restored.load()
+    expect(restored.position(displayFixture.all, 1, { width: 1280, height: 820 })).toEqual({ x: -1600, y: 110 })
+  })
+
+  it.each(['hidden', 'minimized', 'session-ending', 'destroyed'] as const)('does not replace the remembered display for a %s main window', async (state) => {
+    const { DesktopDisplayMemory } = await import('../src/display-memory.ts')
+    const path = join(harness.app.getPath('userData'), 'window-display.json')
+    await new DesktopDisplayMemory(path).remember(displayFixture.all, 1, 2)
+    await readyWorkspace()
+    const window = harness.windows[0]!
+    if (state === 'hidden') window.visible = false
+    else if (state === 'minimized') window.minimized = true
+    else if (state === 'session-ending') window.emit('session-end', { reasons: ['shutdown'] })
+    else window.destroyed = true
+    window.emit('move')
+    window.emit('resize')
+    expect(displayFixture.screen.getDisplayMatching).not.toHaveBeenCalled()
+    const restored = new DesktopDisplayMemory(path)
+    await restored.load()
+    expect(restored.position(displayFixture.all, 1, { width: 1280, height: 820 })).toEqual({ x: -1600, y: 110 })
+  })
+
+  it.each(['quit', 'quit-with-host-error', 'restart', 'update'] as const)('settles a pending display write before %s and ignores shutdown moves', async (operation) => {
+    const host = await readyForUpdate()
+    if (operation === 'quit-with-host-error') host.stop.mockImplementationOnce(() => {
+      host.stopping.resolve()
+      return Promise.reject(new Error('Host cleanup failed'))
+    })
+    const window = harness.windows[0]!
+    const atomic = await import('@deepseek-ai/dsh-atomic-write')
+    const { DesktopDisplayMemory } = await import('../src/display-memory.ts')
+    const originalWrite = atomic.writeFileAtomic
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- Called with the live instance via .call(this).
+    const originalFlush = DesktopDisplayMemory.prototype.flush
+    const writing = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
+    const flushing = Promise.withResolvers<undefined>()
+    vi.spyOn(atomic, 'writeFileAtomic').mockImplementationOnce(async (...args) => {
+      writing.resolve(undefined)
+      await release.promise
+      await originalWrite(...args)
+    })
+    vi.spyOn(DesktopDisplayMemory.prototype, 'flush').mockImplementationOnce(function (this: InstanceType<typeof DesktopDisplayMemory>) {
+      flushing.resolve(undefined)
+      return originalFlush.call(this)
+    })
+    displayFixture.matchingId = 2
+    window.emit('move')
+    await writing.promise
+    let accepted = false
+    let preparation: Promise<boolean> | undefined
+    try {
+      if (operation === 'update') {
+        harness.dialog.showMessageBox.mockResolvedValueOnce({ response: 0 })
+        preparation = harness.prepareUpdate().then((value) => { accepted = value; return value })
+      } else if (operation === 'restart') {
+        const restart = applicationMenuItems().find(item => item.label === en.restartAppHostMenu)!
+        ;(restart.click as () => void)()
+      } else {
+        harness.app.quit()
+      }
+      await host.stopping.promise
+      host.exited.resolve()
+      await flushing.promise
+      expect(accepted).toBe(false)
+      expect(harness.app.quit).toHaveBeenCalledTimes(operation === 'update' ? 0 : 1)
+      const matches = displayFixture.screen.getDisplayMatching.mock.calls.length
+      displayFixture.matchingId = 1
+      window.emit('move')
+      expect(displayFixture.screen.getDisplayMatching).toHaveBeenCalledTimes(matches)
+    } finally {
+      release.resolve(undefined)
+      host.exited.resolve()
+      if (preparation !== undefined) await preparation
+    }
+    if (operation === 'update') expect(accepted).toBe(true)
+    else await harness.quitCompleted.promise
+    const restored = new DesktopDisplayMemory(join(harness.app.getPath('userData'), 'window-display.json'))
+    await restored.load()
+    expect(restored.position(displayFixture.all, 1, { width: 1280, height: 820 })).toEqual({ x: -1600, y: 110 })
+  })
+
+  it('keeps the next launch on default placement after an OS-driven move following a layout change', async () => {
+    const host = await readyWorkspace()
+    const window = harness.windows[0]!
+    displayFixture.all = displayFixture.all.slice(0, 1)
+    window.emit('move')
+    harness.app.quit()
+    await host.stopping.promise
+    host.exited.resolve()
+    await harness.quitCompleted.promise
+    const { DesktopDisplayMemory } = await import('../src/display-memory.ts')
+    const restored = new DesktopDisplayMemory(join(harness.app.getPath('userData'), 'window-display.json'))
+    await restored.load()
+    expect(restored.position(displayFixture.all, 1, { width: 1280, height: 820 })).toBeUndefined()
+  })
+
   it.each([true, false])('selects the package manager before Host startup (packaged=%s)', async (packaged) => {
     harness.app.isPackaged = packaged
     await readyForUpdate()

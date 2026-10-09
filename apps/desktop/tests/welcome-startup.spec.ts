@@ -46,7 +46,14 @@ vi.mock('../src/crash-report.ts', async importOriginal => ({
   writeCrashReport: vi.fn(async () => undefined),
   pruneCrashReports: vi.fn(async () => {}),
 }))
+vi.mock('../src/display-memory.ts', () => ({ DesktopDisplayMemory: class {
+  load = vi.fn(async () => {})
+  position = vi.fn(() => undefined)
+  remember = vi.fn(async () => {})
+  flush = vi.fn(async () => {})
+} }))
 vi.mock('electron', () => ({
+  screen: { getAllDisplays: () => [], getPrimaryDisplay: () => ({ id: 1 }) },
   clipboard: { writeText: state.copy },
   app: {
     isPackaged: false,

@@ -1,0 +1,5 @@
+{
+  "first-launch": { "width": 1280, "height": 820, "minWidth": 520, "minHeight": 600 },
+  "remembered-display": { "width": 1280, "height": 820, "minWidth": 520, "minHeight": 600, "x": -1600, "y": 110 },
+  "changed-layout": { "width": 1280, "height": 820, "minWidth": 520, "minHeight": 600 }
+}

@@ -66,6 +66,8 @@ macOS 安装会创建 `/usr/local/bin/dsh`；目录权限需要时，系统会�
 
 ## 关闭窗口与退出
 
+新启动时，主窗口只记忆所在显示器，不记忆位置、大小、最大化或全屏状态。仅当显示器 ID、边界、工作区、缩放、旋转和主显示器均完全匹配时，窗口才以默认的 1280 × 820 大小在该显示器工作区居中打开。首次启动、记录缺失或无效、显示器布局有任何变化时，保留 Electron 默认的主窗口定位。设备本地记录位于 `app.getPath('userData')/window-display.json`，保存布局摘要，不保存窗口几何信息。开发版使用独立的 Electron userData 目录。读取或写入失败只产生警告，不阻止启动或其他窗口操作。正常退出、重启和更新前都会等待待处理写入完成。欢迎窗口和弹窗的定位不变；重新显示已隐藏的主窗口时复用原窗口，不重新定位。
+
 关闭主窗口（macOS 的关闭按钮和 ⌘W；Windows 的 ×、Alt+F4 和任务栏"关闭窗口"）会隐藏窗口；Windows 首次隐藏前需要确认。页面和 Host 继续运行，任务不受影响，下次显示时仍是原来的文档，会话、草稿和滚动位置都保留；macOS 全屏窗口先退出全屏再隐藏。macOS 通过 Dock 图标、再次启动或 `dsh://open` 找回窗口，Windows 通过托盘找回。最小化行为不变。进入工作区前关闭欢迎窗口，Windows 上走退出流程，macOS 上应用留在 Dock 中且没有窗口。
 
 Windows 在整个运行期间常驻托盘图标。悬停提示为产品名，单击显示并聚焦窗口，右键菜单提供壳语言下的"打开 DeepSeek Harness"和"退出 DeepSeek Harness"。首次隐藏前复用更新弹窗，显示“正在运行的任务不会中断，可在系统托盘中重新打开窗口”和“确认”按钮。确认后隐藏窗口，并在 Electron userData 下写入 `background-close-confirmed`；Esc、关闭弹窗或加载失败均保持主窗口可见，不记录确认。重复关闭请求会聚焦已有壳弹窗。覆盖更新保留标记，卸载删除标记。旧的 `background-notice-shown` 标记不会跳过此确认。关闭窗口不发送系统通知。托盘位图是 `resources/tray-windows.ico`，由 `pnpm run render:tray-icon` 从 `resources/icon-windows.svg` 按 16、20、24、32、40、48、64 像素分别渲染，打包为 `resources/tray.ico`。macOS 不提供菜单栏图标。
