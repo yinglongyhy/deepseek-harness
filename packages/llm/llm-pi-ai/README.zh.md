@@ -184,6 +184,8 @@ git add packages/llm/llm-pi-ai/src/provider-data.generated.ts
 
 成功 assistant 响应会存储带版本的、无损 JSON 回放状态，与产生它们的提供方和模型放在一起——响应级事实加每个流式块一条逐块条目。请求时，`LlmRuntime` 仅当同一适配器实例拥有两条路由时才传递回放状态；适配器校验它并恢复原生响应 id、提供方签名与可选的 `providerThinkingLevel` effort 元数据，缺失的 effort 元数据仍保持缺失。回放会对照 assistant 来源校验请求模型身份，并用它保留同模型签名；提供方报告的响应模型仅作为诊断元数据。回放状态缺失或无法使用时会降级为提供方无关内容，并保留 assistant 来源中必需的提供方和模型。pi-ai 工具调用参数是解析后的对象，因此适配器解析输入并重新字符串化输出，以符合 harness 原始 JSON 约定；pi-ai 流内错误事件映射为终止 `finish` 分片。 协议转换仅作用于请求副本。从 A 切换到 B 再切回 A 时，存储的内容保持完整，包括空文本块、工具 id、原始块顺序和原生回放元数据；不受支持的签名仅从发给其他协议的请求中省略。
 
+仅对精确名为 `openai-codex` 的提供方，原本未分类、文本精确为 `WebSocket error`，或完整匹配 `WebSocket closed 1000` 或 `WebSocket closed 1006` 的错误映射为 `TRANSPORT`，错误文本保持不变；关闭码后可带冒号或空格及原因。pi-ai 在 socket 于终止响应事件前关闭时产生这些错误；socket 正常关闭不代表模型响应完成。已有分类和调用方取消优先；其他关闭码与提供方别名不新增分类。重试由提供方的 `retryPolicy` 与 `dsh-llm-retry` 负责，此映射不改变 transport、OAuth、退避或重试次数上限。
+
 </details>
 
 -----

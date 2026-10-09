@@ -835,6 +835,18 @@ describe('toStreamChunks', () => {
     ])
   })
 
+  it('keeps caller cancellation ahead of a Codex close error', async () => {
+    const caller = new AbortController()
+    caller.abort()
+    const error = assistant({ provider: 'openai-codex', stopReason: 'error', errorMessage: 'WebSocket closed 1006' })
+    const chunks = await collect(toStreamChunks(feed({ type: 'error', reason: 'error', error }), undefined, caller.signal))
+    expect(chunks.at(-1)).toEqual({
+      type: 'finish',
+      reason: { kind: 'aborted', failure: { message: 'WebSocket closed 1006', code: 'ABORTED' } },
+    })
+    expect(error.stopReason).toBe('error')
+  })
+
   it('maps aborted error events to aborted finish', async () => {
     const error = assistant({ stopReason: 'aborted' })
     const chunks = await collect(toStreamChunks(feed({ type: 'error', reason: 'aborted', error })))
@@ -954,6 +966,64 @@ describe('mapStopReason / mapUsage', () => {
   ])('maps pi-ai transport wording %j', (errorMessage) => {
     expect(mapStopReason(assistant({ stopReason: 'error', errorMessage })))
       .toMatchObject({ kind: 'error', failure: { code: 'TRANSPORT' } })
+  })
+
+  it('maps the generic Codex WebSocket error without changing its message', () => {
+    expect(mapStopReason(assistant({ provider: 'openai-codex', stopReason: 'error', errorMessage: 'WebSocket error' })))
+      .toEqual({ kind: 'error', failure: { message: 'WebSocket error', code: 'TRANSPORT' } })
+  })
+
+  it.each([
+    'WebSocket closed 1000',
+    'WebSocket closed 1006',
+    'WebSocket closed 1000: peer ended',
+    'WebSocket closed 1006: peer ended',
+    'WebSocket closed 1000 peer ended',
+    'WebSocket closed 1006 peer ended\nwhile streaming',
+  ])('maps Codex premature close %j without changing its message', (errorMessage) => {
+    expect(mapStopReason(assistant({ provider: 'openai-codex', stopReason: 'error', errorMessage })))
+      .toEqual({ kind: 'error', failure: { message: errorMessage, code: 'TRANSPORT' } })
+  })
+
+  it.each([
+    'WebSocket closed 1008',
+    'WebSocket closed 1009 message too big',
+    'WebSocket closed 1011',
+    'WebSocket closed 10000',
+    'WebSocket closed 1006x',
+    'WebSocket closed',
+    'WebSocket error: unsupported runtime',
+    'WebSocket transport is not available in this runtime',
+    'wrapped: WebSocket error',
+    'wrapped: WebSocket closed 1006',
+  ])('does not expand Codex close classification to %j', (errorMessage) => {
+    expect(mapStopReason(assistant({ provider: 'openai-codex', stopReason: 'error', errorMessage })))
+      .toEqual({ kind: 'error', failure: { message: errorMessage, code: 'PI_AI_ERROR' } })
+  })
+
+  it.each(['deepseek', 'codex-alias'])('does not classify Codex close wording for route %j', (provider) => {
+    for (const errorMessage of ['WebSocket closed 1006', 'WebSocket error']) {
+      expect(mapStopReason(assistant({ provider, stopReason: 'error', errorMessage })))
+        .toEqual({ kind: 'error', failure: { message: errorMessage, code: 'PI_AI_ERROR' } })
+    }
+  })
+
+  it.each([
+    ['WebSocket closed 1006: HTTP 401', 'AUTH'],
+    ['WebSocket closed 1006: insufficient_quota', 'QUOTA'],
+    ['WebSocket closed 1006: HTTP 429', 'RATE_LIMIT'],
+    ['WebSocket closed 1006: HTTP 400', 'INVALID_REQUEST'],
+    ['WebSocket closed 1006: HTTP 500', 'SERVER'],
+    ['WebSocket closed 1006: timeout', 'TIMEOUT'],
+    ['WebSocket closed 1006: input exceeds the model context window limit', CONTEXT_WINDOW_EXCEEDED_CODE],
+  ])('preserves existing classification for %j', (errorMessage, code) => {
+    expect(mapStopReason(assistant({ provider: 'openai-codex', stopReason: 'error', errorMessage })))
+      .toEqual({ kind: 'error', failure: { message: errorMessage, code } })
+  })
+
+  it.each(['WebSocket closed 1006', 'WebSocket error'])('keeps an aborted Codex error aborted: %j', (errorMessage) => {
+    expect(mapStopReason(assistant({ provider: 'openai-codex', stopReason: 'aborted', errorMessage })))
+      .toEqual({ kind: 'aborted', failure: { message: errorMessage, code: 'ABORTED' } })
   })
 
   it('uses pi-ai provider-specific overflow classification without losing rate-limit exclusions', () => {

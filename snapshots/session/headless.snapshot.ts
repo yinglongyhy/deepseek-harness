@@ -1,6 +1,7 @@
 /** Recorded-session replay through the shipped headless `dsh` profile. */
 
 import { startHttpMcpFixture } from '../../packages/mcp/mcp-client/tests/http-fixture.ts'
+import { startCodexWebSocketRetryFixture } from '../../apps/cli/tests/fixtures/codex-websocket-retry-fixture.ts'
 import { cp, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, utimes, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
@@ -135,7 +136,7 @@ function bindsOsAssignedPort(argument: ts.Expression | undefined): boolean {
 }
 
 function listenerPortViolations(path: string, sourceText: string): string[] {
-  const source = ts.createSourceFile(path, sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)
+  const source = ts.createSourceFile(path, sourceText, ts.ScriptTarget.Latest, true)
   const violations: string[] = []
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node)
@@ -966,8 +967,8 @@ describe('headless recorded-session snapshots', () => {
       'server.listen({ ...options, port: 0 })',
       'server.listen({ path: socketPath })',
     ].join('\n'))).toEqual([])
-    expect(listenerPortViolations('fixed.mjs', 'server.listen(43118)')).toEqual([
-      'fixed.mjs:1: listener port 43118 must use listen(0, ...) or listen({ port: 0, ... })',
+    expect(listenerPortViolations('fixed.ts', 'const server: Server = createServer(); server.listen(43118)')).toEqual([
+      'fixed.ts:1: listener port 43118 must use listen(0, ...) or listen({ port: 0, ... })',
     ])
     expect(listenerPortViolations('dynamic.mjs', 'server.listen({ port, ...options })')).toEqual([
       'dynamic.mjs:1: listener port { port, ...options } must use listen(0, ...) or listen({ port: 0, ... })',
@@ -978,7 +979,10 @@ describe('headless recorded-session snapshots', () => {
   })
 
   it('binds scenario HTTP fixtures only to OS-assigned ports', async () => {
-    const fixtureNames = (await readdir(snapshotsRoot, { recursive: true })).filter(name => name.endsWith('.mjs'))
+    const fixtureNames = [
+      ...(await readdir(snapshotsRoot, { recursive: true })).filter(name => name.endsWith('.mjs')),
+      '../../apps/cli/tests/fixtures/codex-websocket-retry-fixture.ts',
+    ]
     const violations = (await Promise.all(fixtureNames.map(async (fixtureName) => listenerPortViolations(
       fixtureName,
       await readFile(join(snapshotsRoot, fixtureName), 'utf8'),
@@ -1269,8 +1273,10 @@ describe('headless recorded-session snapshots', () => {
       const spillRoot = await mkdtemp(join(tmpdir(), 'acp-snap-spill-'))
       const locatorRoot = snapshotSpillRoot(join(scenario.dir, fixtureFiles[0] as string))
       const mcpDemo = scenario.name === 'plugin-manager-mcp' ? await startHttpMcpFixture() : undefined
+      let codexWebSocket: Awaited<ReturnType<typeof startCodexWebSocketRetryFixture>> | undefined
       let result: Awaited<ReturnType<typeof runLoaderSmoke>>
       try {
+        if (scenario.name === 'codex-websocket-retry') codexWebSocket = await startCodexWebSocketRetryFixture()
         result = await runLoaderSmoke({
           label: `${scenario.name} headless snapshot`,
           tempDirPrefix: 'dsh-log-snap-',
@@ -1312,6 +1318,19 @@ describe('headless recorded-session snapshots', () => {
             NODE_OPTIONS: [process.env.NODE_OPTIONS, '--disable-warning=ExperimentalWarning'].filter(Boolean).join(' '),
             DSH_TELEMETRY_DISABLED: '1',
             ...(mcpDemo === undefined ? {} : { DSH_MCP_DEMO_URL: mcpDemo.url }),
+            ...(codexWebSocket === undefined ? {} : {
+              DSH_SNAPSHOT_CODEX_BASE_URL: codexWebSocket.baseURL,
+              DSH_SNAPSHOT_CODEX_API_KEY: `fixture.${Buffer.from(JSON.stringify({
+                'https://api.openai.com/auth': { chatgpt_account_id: 'snapshot-account' },
+              })).toString('base64url')}.fixture`,
+              HTTP_PROXY: '',
+              HTTPS_PROXY: '',
+              ALL_PROXY: '',
+              http_proxy: '',
+              https_proxy: '',
+              all_proxy: '',
+              NODE_USE_ENV_PROXY: '0',
+            }),
           },
           prepare: async (cwd) => {
             if (scenario.manifest.workspace?.parent === 'outside-temp') assertWorkspaceOutsideTemp(cwd)
@@ -1350,6 +1369,22 @@ describe('headless recorded-session snapshots', () => {
               expect(results.every(result => result.isError === false)).toBe(true)
               expect(log).toContain('# Office task routing')
             }
+            if (codexWebSocket !== undefined) {
+              const log = actualLogs[0]!.content
+              const rows = records(log)
+              expect(codexWebSocket.requests).toBe(2)
+              expect(codexWebSocket.errors).toEqual([])
+              const retries = rows.filter(row => row.type === 'llm/retry')
+              expect(retries).toHaveLength(1)
+              expect(retries[0]).toMatchObject({ data: { failure: {
+                code: 'TRANSPORT',
+                message: 'WebSocket error',
+              } } })
+              expect(rows.filter(row => row.type === 'assistant/attempt')).toHaveLength(1)
+              expect(rows.filter(row => row.type === 'tool/call')).toHaveLength(0)
+              expect(rows.filter(row => row.type === 'assistant/message')).toHaveLength(1)
+              expect(finalTextFromSession(log)).toBe('Recovered.')
+            }
             if (scenario.name === 'advanced-toolchain') verifyAdvancedToolchain(actualLogs)
             if (scenario.name === 'session-query-spill') {
               await verifySessionQuerySpill(actualLogs[0]!.content, spillRoot, locatorRoot)
@@ -1384,8 +1419,12 @@ describe('headless recorded-session snapshots', () => {
           },
         })
       } finally {
-        await mcpDemo?.close()
-        await rm(spillRoot, { recursive: true, force: true })
+        try {
+          await mcpDemo?.close()
+          await codexWebSocket?.close()
+        } finally {
+          await rm(spillRoot, { recursive: true, force: true })
+        }
       }
 
       const stderrLog = mode === 'replay' ? primaryFixture : actualLogs[0]?.content

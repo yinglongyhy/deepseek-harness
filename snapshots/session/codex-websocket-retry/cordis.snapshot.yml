@@ -1,0 +1,32 @@
+- id: llm-deepseek
+  disabled: true
+
+- id: llm-pi-ai
+  config:
+    providers:
+      openai-codex:
+        apiKeyEnv: DSH_SNAPSHOT_CODEX_API_KEY
+        baseURL: !!js process.env.DSH_SNAPSHOT_CODEX_BASE_URL
+        transport: websocket
+        websocketConnectTimeoutMs: 3000
+        streamIdleTimeoutMs: 3000
+        retryPolicy:
+          mode: normal
+          maxRetries: 2
+          backoff:
+            initialDelayMs: 1
+            maxDelayMs: 1
+            jitterRatio: 0
+        models:
+          - id: gpt-5.5
+            api: openai-codex-responses
+
+- id: agent-default-model
+  config:
+    provider: openai-codex
+    model: gpt-5.5
+
+- id: session-persistence-jsonl
+  config:
+    root: !!js dshHomePath('sessions')
+    compression: none

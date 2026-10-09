@@ -39,7 +39,7 @@ export function mapUsage(usage: PiUsage): TokenUsage {
 // wrapper a bare `terminated`, so we are left pattern-matching terse words here.
 // If pi-ai ever forwards the original Error (or a fetch/dispatcher hook that lets
 // us capture the cause ourselves), classify on `code`/`cause` instead of text.
-function classifyPiAiError(message: string): string {
+function classifyPiAiError(message: string, provider: string): string {
   if (/\b(?:401|403)\b/.test(message)) return 'AUTH'
   if (isQuotaExceededError(message)) return QUOTA_EXCEEDED_CODE
   if (/\b429\b|rate.?limit/i.test(message)) return 'RATE_LIMIT'
@@ -64,6 +64,13 @@ function classifyPiAiError(message: string): string {
     || /\bterminated\b|premature close/i.test(message)) {
     return 'TRANSPORT'
   }
+  // Codex emits close errors only before its terminal response event; 1000
+  // completes the socket, not the response. pi-ai reason separators vary by version.
+  if (provider === 'openai-codex'
+    && (message === 'WebSocket error'
+      || /^WebSocket closed (?:1000|1006)(?:[: ][\s\S]*)?$/.test(message))) {
+    return 'TRANSPORT'
+  }
   return 'PI_AI_ERROR'
 }
 
@@ -75,7 +82,10 @@ function classifyPiAiError(message: string): string {
  *   `contextWindow`, and zero-output `length` usage that fills the window map
  *   to `CONTEXT_WINDOW_EXCEEDED`; a `stop` with no content blocks maps to an
  *   `EMPTY_RESPONSE` error, while terminal `pending` and `deferred` states map
- *   to non-retryable `PI_AI_ERROR` failures.
+ *   to non-retryable `PI_AI_ERROR` failures. Otherwise unclassified
+ *   `openai-codex` errors with exact text `WebSocket error` and WebSocket
+ *   1000/1006 close errors map to `TRANSPORT`,
+ *   preserving the message and leaving retries to the provider policy.
  */
 export function mapStopReason(message: AssistantMessage, contextWindow?: number): FinishReason {
   const piAiOverflow = isContextOverflow(message, contextWindow)
@@ -122,7 +132,7 @@ export function mapStopReason(message: AssistantMessage, contextWindow?: number)
     }
     case 'error': {
       const text = message.errorMessage ?? 'pi-ai stream error'
-      return { kind: 'error', failure: { message: text, code: classifyPiAiError(text) } }
+      return { kind: 'error', failure: { message: text, code: classifyPiAiError(text, message.provider) } }
     }
   }
 }

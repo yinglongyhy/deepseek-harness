@@ -1,0 +1,9 @@
+version: 1
+scenario: codex-websocket-retry
+profile: headless
+composition: codex-websocket-retry
+recording: live
+header:
+  class: codex-websocket-retry
+  pin: true
+  toolSchemasSource: text-turn
