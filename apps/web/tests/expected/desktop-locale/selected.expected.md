@@ -3,6 +3,7 @@
     - text: Settings
     - button "General"
     - button "Models"
+    - button "Codex sign-in"
     - button "Built-in plugins"
     - button "Agent presets"
   - button "Open configuration file"

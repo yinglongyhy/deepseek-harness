@@ -1,0 +1,61 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/llm/llm-codex-account/README.md
+/:
+  en: d667059aa2cd0374
+  zh: 57777b9ddd6eedf8
+/deepseek-ai-dsh-llm-codex-account:
+  en: e69d4a2e7b1de097
+  zh: bd1564a3a505599d
+/deepseek-ai-dsh-llm-codex-account/summary:
+  en: 9249969400ac087e
+  zh: 0af39733d221bb5e
+/deepseek-ai-dsh-llm-codex-account/table-of-contents:
+  en: d152484eb41ac6b4
+  zh: 364c80ee00a374ff
+/deepseek-ai-dsh-llm-codex-account/use-this-package:
+  en: 13bdc6c784204ffe
+  zh: 6fb433c6387a6e3c
+/deepseek-ai-dsh-llm-codex-account/use-this-package/when-to-choose-it:
+  en: 45fdf37441b819fa
+  zh: 6ffde5a3ddc75755
+/deepseek-ai-dsh-llm-codex-account/use-this-package/minimal-configuration:
+  en: 9712dc3e16747919
+  zh: f0604be6f3095de0
+/deepseek-ai-dsh-llm-codex-account/use-this-package/sign-in-and-choose-a-route:
+  en: dfae6cd799ff1ad5
+  zh: 107fbfa3259319d3
+/deepseek-ai-dsh-llm-codex-account/use-this-package/edit-the-model-catalog:
+  en: c5f72392d06b23f3
+  zh: 19c0ba0877ba284b
+/deepseek-ai-dsh-llm-codex-account/use-this-package/view-account-information:
+  en: 3c87a7451d32cfe3
+  zh: 190d4210d6b6b6b5
+/deepseek-ai-dsh-llm-codex-account/understand-the-implementation:
+  en: 742173a914d9003e
+  zh: 1e24a2f2591fb35d
+/deepseek-ai-dsh-llm-codex-account/further-exploration:
+  en: 2dd753786cd2e710
+  zh: 5be5d8f351559aa8
+/deepseek-ai-dsh-llm-codex-account/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-llm-codex-account/model-experience/openai-codex-account-status-and-model-catalog:
+  en: a22927cc83dca353
+  zh: db054af9b7f89c4a
+/deepseek-ai-dsh-llm-codex-account/model-experience/openai-codex-account-status-and-model-catalog/what-the-model-sees:
+  en: 6ea6c886d9256996
+  zh: 956622cfd8ab4313
+/deepseek-ai-dsh-llm-codex-account/model-experience/openai-codex-account-status-and-model-catalog/token-effect:
+  en: e620897dd1201678
+  zh: 90381547e73bb210
+/deepseek-ai-dsh-llm-codex-account/model-experience/openai-codex-account-status-and-model-catalog/kv-cache-effect:
+  en: 520a149c274c6164
+  zh: 40f3a81790b65ccf
+/deepseek-ai-dsh-llm-codex-account/known-limitations-and-deferred-work:
+  en: 3d4f9f13608725a0
+  zh: 7a870f7bfee97e56
+/deepseek-ai-dsh-llm-codex-account/known-limitations-and-deferred-work/dev-note:
+  en: f9ece3fcd276efe5
+  zh: 7a3d7639583800b7

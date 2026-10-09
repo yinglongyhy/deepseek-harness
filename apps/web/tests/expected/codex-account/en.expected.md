@@ -1,0 +1,4 @@
+- group "Sign in with ChatGPT":
+  - paragraph: Sign in with ChatGPT
+  - status: Not signed in.
+  - button "Sign in"

@@ -28,6 +28,9 @@
     // not declaration path aliases, keep each package/vendor source compiled
     // under its own tsconfig boundary.
     "paths": {
+      "@deepseek-ai/dsh-llm-codex-account": ["./packages/llm/llm-codex-account/src/index.ts"],
+      "@deepseek-ai/dsh-llm-codex-account/client": ["./packages/llm/llm-codex-account/src/client/index.ts"],
+      "@deepseek-ai/dsh-llm-codex-account/src/*": ["./packages/llm/llm-codex-account/src/*"],
       "@deepseek-ai/dsh-experimental-session-search": ["./packages/experimental/session-search/src/index.ts"],
       "@deepseek-ai/dsh-experimental-ralph-bundle": ["./packages/experimental/ralph-bundle/src/index.ts"],
       "@deepseek-ai/dsh-experimental-terminal-bundle": ["./packages/experimental/terminal-bundle/src/index.ts"],

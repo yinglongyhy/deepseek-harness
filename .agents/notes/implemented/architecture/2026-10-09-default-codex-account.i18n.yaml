@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-10-09-default-codex-account.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-10-09-default-codex-account.md
+/agent-note-default-codex-account-integration:
+  en: 914b73a5c0b27973
+  zh: fc814d35ac59da47
+/agent-note-default-codex-account-integration/problem:
+  en: 13aee1f2dcbdbc3b
+  zh: 05b0bb615be155f0
+/agent-note-default-codex-account-integration/decision:
+  en: ae55c135dd0462c9
+  zh: c66a71bfa761336e
+/agent-note-default-codex-account-integration/alternatives-considered:
+  en: 5a83876c43792151
+  zh: 9f40c0576c42675e
+/agent-note-default-codex-account-integration/consequences:
+  en: 14dff69b80271a98
+  zh: 812a04b9e3b111cd

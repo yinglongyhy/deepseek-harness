@@ -63,6 +63,11 @@ const SAFE_HOST_DEPENDENCY_EXPORTS = {
 const PEER_REQUIRED_HOST_EXPORTS = {
   // `instanceof` checks need the translator's own class instance.
   '@deepseek-ai/dsh-experimental-translator': ['TranslationError'],
+  '@deepseek-ai/dsh-credentials': ['credentialRef'],
+  '@deepseek-ai/dsh-launch-environment': ['launchEnvironmentOf'],
+  '@deepseek-ai/dsh-llm-deepseek-api-key': ['Config', 'plainOptions', 'resolveAdapterOptions'],
+  '@deepseek-ai/dsh-llm-pi-ai': ['recordKeyFor'],
+  '@deepseek-ai/dsh-settings': ['SettingsConflictError'],
   '@deepseek-ai/dsh-scope': ['carrierKeyOf', 'createScope', 'scopeOf', 'scopeTarget'],
   '@deepseek-ai/dsh-session': ['SESSION_FORMAT_VERSION'],
   '@deepseek-ai/dsh-session-persistence': ['SessionPersistenceNotFoundError'],

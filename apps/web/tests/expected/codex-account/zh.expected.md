@@ -1,0 +1,4 @@
+- group "使用 ChatGPT 登录":
+  - paragraph: 使用 ChatGPT 登录
+  - status: 尚未登录。
+  - button "登录"

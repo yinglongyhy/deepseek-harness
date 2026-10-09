@@ -1724,6 +1724,33 @@ export interface Config {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-jobs-local -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-llm-codex-account -->
+<a id="deepseek-aidsh-llm-codex-account"></a>
+
+## `@deepseek-ai/dsh-llm-codex-account`
+
+- `inject`: `connection` · `webServer`
+- `source`: [`packages/llm/llm-codex-account/src/host/config.ts:29`](../packages/llm/llm-codex-account/src/host/config.ts)
+
+```ts config-catalog
+/** Host configuration of the Codex login bridge. */
+export interface Config {
+  /** Cache lifetime for provider balance and quota summaries. */
+  readonly providerInfoRefreshIntervalMs: number
+  /** Maximum time allowed to fetch provider information, including credential refresh. */
+  readonly providerInfoRequestTimeoutMs: number
+  /** Poll cadence the Client is told to use while an attempt is pending. */
+  readonly pollIntervalMs: number
+  /** Total lifetime of one attempt before the Host withdraws it. */
+  readonly loginDeadlineMs: number
+  /** Idle time without a `query` after which the Host treats the page as gone. */
+  readonly attemptLeaseMs: number
+  /** How long a settled attempt stays answerable before its identity is retired. */
+  readonly attemptRetentionMs: number
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-llm-codex-account -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-llm-deepseek-account -->
 <a id="deepseek-aidsh-llm-deepseek-account"></a>
 

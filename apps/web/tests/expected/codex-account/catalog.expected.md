@@ -1,0 +1,36 @@
+- dialog "Settings":
+  - navigation:
+    - text: Settings
+    - button "General"
+    - button "Models"
+    - button "Codex sign-in"
+    - button "Built-in plugins"
+    - button "Agent presets"
+  - button "Open configuration file"
+  - button "Close"
+  - group "Sign in with ChatGPT":
+    - paragraph: Sign in with ChatGPT
+    - status: Not signed in.
+    - button "Sign in"
+  - region "Models":
+    - text: Models Customized model catalog
+    - button "Restore defaults"
+    - textbox "Model ID 1":
+      - /placeholder: Model ID
+      - text: dsh-codex-before
+    - textbox "Display name 1":
+      - /placeholder: Display name
+      - text: Edited model
+    - button "Model options 1"
+    - button "Delete model 1"
+    - textbox "Model ID 2":
+      - /placeholder: Model ID
+      - text: dsh-codex-browser-added
+    - textbox "Display name 2":
+      - /placeholder: Display name
+      - text: Browser-added model
+    - button "Model options 2"
+    - button "Delete model 2"
+    - button "Add model"
+  - button "Cancel" [disabled]
+  - button "Apply"

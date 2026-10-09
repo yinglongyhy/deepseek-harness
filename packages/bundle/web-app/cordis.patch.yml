@@ -408,6 +408,10 @@
     - id: ui-message-feedback
       name: '@deepseek-ai/dsh-client-ui-message-feedback'
 
+    # Codex account sign-in/catalog and provider usage, with separate Host/Client entries.
+    - id: llm-codex-account
+      name: '@deepseek-ai/dsh-llm-codex-account'
+
     # Model selection: the /model popupSelect + composer seat over session.models.
     - id: ui-model-selection
       name: '@deepseek-ai/dsh-client-ui-model-selection'
