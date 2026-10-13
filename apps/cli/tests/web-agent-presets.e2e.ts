@@ -99,7 +99,7 @@ const MINIMAL_BASH_DESCRIPTION = `Run commands in a bash shell
 /**
  * Boot the shipped Web composition, minus the rows that would bind a port,
  * touch the network, or write outside the test. Everything that decides an
- * agent's capabilities is the real thing, including both shipped presets.
+ * agent's capabilities is the real thing, including all shipped presets.
  */
 async function bootWeb(
   profileHome: string,
@@ -277,10 +277,10 @@ describe('the shipped Web composition', () => {
     }
   })
 
-  it('supplies both shipped presets, and only those, from the system root', async () => {
+  it('supplies all shipped presets, and only those, from the system root', async () => {
     const listed = await ctx.agentPresets.list()
 
-    expect(listed.map(preset => preset.id).sort()).toEqual(['cordis', 'minimal', 'ptc', 'standard'])
+    expect(listed.map(preset => preset.id).sort()).toEqual(['coding', 'cordis', 'minimal', 'ptc', 'standard'])
     expect(listed.every(preset => !('path' in preset))).toBe(true)
     expect(ctx.agentPresets.defaultId).toBe('standard')
   })
@@ -310,22 +310,52 @@ describe('the shipped Web composition', () => {
     }
   })
 
-  it('applies the default-off subagent model allowlist only to new sessions', async () => {
+  it('adds the Coding delegation policy without changing Standard or model-selection settings', async () => {
+    const handles = await Promise.all(['standard', 'coding', 'ptc'].map(preset => ctx.agents.create({
+      sessionId: SessionId(`preset-policy-${preset}`),
+      setup: agentCtx => ctx.agentPresets.mount(agentCtx, preset).then(() => undefined),
+    })))
+    try {
+      const [standard, coding, ptc] = await Promise.all(handles.map(handle => ctx.systemPrompt.assemble({ scope: handle.agent })))
+      const suffix = coding!.sections.find(section => section.name === 'deployment:persona-suffix')!.text
+      expect(suffix).toContain('# Coding 模式：子代理委派策略')
+      expect(suffix).toContain('`provider=openai-codex`')
+      expect(suffix).toContain('| L0 | `gpt-6-luna` | `low` |')
+      expect(suffix).toContain('| L1 | `gpt-6-luna` | `medium` |')
+      expect(suffix).toContain('| L2 | `gpt-6-luna` | `high` |')
+      expect(suffix).toContain('| L3 | `gpt-6.1-sol` | `high` |')
+      expect(suffix).toContain('也不授予额外提交权限。')
+      expect(standard!.sections.some(section => section.text.includes('子代理委派策略'))).toBe(false)
+      expect(ptc!.sections.some(section => section.text.includes('子代理委派策略'))).toBe(false)
+      expect(coding!.tools.map(tool => tool.name)).toEqual(['run_code'])
+      expect(coding!.tools).toEqual(ptc!.tools)
+      expect(coding!.sections.find(section => section.name === 'tools:sdk'))
+        .toEqual(ptc!.sections.find(section => section.name === 'tools:sdk'))
+      expect(standard!.tools.map(tool => tool.name)).toContain('bash')
+      expect(standard!.tools.map(tool => tool.name)).not.toContain('run_code')
+      expect(toolParameterNames(ctx, handles[1]!.agent, 'subagent')).not.toContain('provider')
+      expect(ctx.agentPresets.defaultId).toBe('standard')
+    } finally {
+      await Promise.all(handles.map(handle => handle.dispose()))
+    }
+  })
+
+  it.each(['standard', 'coding'])('applies the default-off subagent model allowlist only to new `%s` sessions', async (preset) => {
     await ctx.settings.update(SUBAGENT_MODEL_SELECTION_SETTINGS_NAMESPACE, {
       enabled: false,
       allowedModels: [],
     })
     const disabled = await ctx.agents.create({
-      sessionId: SessionId('preset-model-selection-disabled'),
-      setup: agentCtx => ctx.agentPresets.mount(agentCtx, 'standard').then(() => undefined),
+      sessionId: SessionId(`preset-model-selection-disabled-${preset}`),
+      setup: agentCtx => ctx.agentPresets.mount(agentCtx, preset).then(() => undefined),
     })
     await ctx.settings.update(SUBAGENT_MODEL_SELECTION_SETTINGS_NAMESPACE, {
       enabled: true,
       allowedModels: [{ provider: 'deepseek-official', model: 'deepseek-v4-flash' }],
     })
     const enabled = await ctx.agents.create({
-      sessionId: SessionId('preset-model-selection-enabled'),
-      setup: agentCtx => ctx.agentPresets.mount(agentCtx, 'standard').then(() => undefined),
+      sessionId: SessionId(`preset-model-selection-enabled-${preset}`),
+      setup: agentCtx => ctx.agentPresets.mount(agentCtx, preset).then(() => undefined),
     })
     try {
       expect(toolNames(ctx, disabled.agent)).not.toContain('list_subagent_models')
@@ -534,13 +564,13 @@ describe('the shipped Web composition', () => {
     }
   })
 
-  it('presents `ptc` as PTC mode without disturbing a native session beside it', async () => {
+  it.each(['ptc', 'coding'])('presents `%s` as PTC mode without disturbing a native session beside it', async (preset) => {
     const coded = await ctx.agents.create({
-      sessionId: SessionId('preset-ptc'),
-      setup: agentCtx => ctx.agentPresets.mount(agentCtx, 'ptc').then(() => undefined),
+      sessionId: SessionId(`preset-ptc-${preset}`),
+      setup: agentCtx => ctx.agentPresets.mount(agentCtx, preset).then(() => undefined),
     })
     const native = await ctx.agents.create({
-      sessionId: SessionId('preset-ptc-native'),
+      sessionId: SessionId(`preset-ptc-native-${preset}`),
       setup: agentCtx => ctx.agentPresets.mount(agentCtx, 'standard').then(() => undefined),
     })
     try {
@@ -704,7 +734,7 @@ describe.each(['web', 'desktop'] as const)('%s native subagent bundles', (surfac
         expect(productCtx.subagents.list().filter(name => (products as readonly string[]).includes(name)).sort())
           .toEqual([...installed].sort())
         const expected = installed.map(toolName).sort()
-        for (const preset of ['standard', 'cordis', 'ptc', 'minimal']) {
+        for (const preset of ['standard', 'coding', 'cordis', 'ptc', 'minimal']) {
           expect(await presetTools(productCtx, preset)).toEqual(expected)
         }
         const handle = await productCtx.agents.create({

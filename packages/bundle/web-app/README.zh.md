@@ -57,7 +57,9 @@ dsh --profile web --no-open --port 8080
 | `surfaceContext` | `true` | 把 `DSH_WEB_URL` 暴露给 agent 的 shell 命令 |
 | `publicUrl` | 未设置 | 对外公告的 HTTP(S) 应用根；否则公告绑定地址 URL |
 
-生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-web-app)列出了本运行时插件接受的字段及其 JSDoc。随发行版交付的组合插入 `schedule` 服务行与 `ui-schedule` 任务页面行，时钟读数与四个提醒工具则属于 `standard`、`cordis` 与 `ptc` 三个 preset。这三个 preset 的 `tool-subagent` 与 `tool-subagent-fork` 两行都 deny 这四个工具，因此被委派子 agent 的作用域不会列出它们。
+生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-web-app)列出了本运行时插件接受的字段及其 JSDoc。随发行版交付的组合插入 `schedule` 服务行与 `ui-schedule` 任务页面行，时钟读数与四个提醒工具则属于 `standard`、`coding`、`cordis` 与 `ptc` 四个 preset。这四个 preset 的 `tool-subagent` 与 `tool-subagent-fork` 两行都 deny 这四个工具，因此被委派子 agent 的作用域不会列出它们。
+
+**Coding 模式**（`coding`）在插件加载时从当前随发行版交付的 PTC 补丁派生，保留全部 PTC 插件（包括 PTC mode）和人设文本，再追加四级委派策略。为新任务选择该模式即可；默认仍为 Standard。来源补丁变更会在后续插件加载时生效，已有 Session 保留其采样配置。提示词策略仅供指导，不是运行时强制。启动需要委派的 Coding 任务前，请在**设置 → 子代理**中启用模型选择，并允许 `openai-codex/gpt-6-luna` 和 `openai-codex/gpt-6.1-sol`；两条路由均须可用。预设不改动 Host 偏好或 provider 凭据。详见 [Coding preset 包](../../preset/coding-preset/README.zh.md)中的来源兼容要求。
 
 <a id="public-deployments"></a>
 ### 监听、信任与公开部署
@@ -120,7 +122,7 @@ URL 行与浏览器交接都是就绪信号：监督方一观察到该行就发�
 | [`src/public-url.ts`](src/public-url.ts) | 公告根的校验与尾斜杠归一化；供本地导入的叶子模块，不属于包 API |
 | [`src/startup.ts`](src/startup.ts) | `web-startup` 提供方：`--host`、`--port`、`--tls-cert`、`--tls-key`、`--public-url`、`--trusted-host`、`--no-open`、`--help` |
 | [`cordis.patch.yml`](cordis.patch.yml) | Web patch：重述的基础值、Web 宿主行、浏览器名录、preset 注册表 |
-| [`presets/`](presets) | 每个随发行版交付的 preset（`standard`、`ptc`、`minimal`、`cordis`）各一条 `@deepseek-ai/dsh-agent-preset` 声明，各自一个补丁文件 |
+| [`presets/`](presets) | `standard`、`ptc`、`minimal`、`cordis` 各有一条 `@deepseek-ai/dsh-agent-preset` 声明；Coding 补丁加载 `@deepseek-ai/dsh-coding-preset`，由其注册派生的 `coding` preset |
 | [`tests/web-app.spec.ts`](tests/web-app.spec.ts) | dist index 锚定、公告 URL 发布与警告、bash 变量、就绪宣告发布 |
 | [`tests/startup.spec.ts`](tests/startup.spec.ts) | 在真实 Loader 树上的命令行解析 |
 | [`tests/public-url.spec.ts`](tests/public-url.spec.ts) | 公告根的解析与归一化 |

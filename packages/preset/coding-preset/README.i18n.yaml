@@ -1,0 +1,52 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/preset/coding-preset/README.md
+/:
+  en: 7077c00c04c34749
+  zh: de5b825f38b6a78e
+/deepseek-ai-dsh-coding-preset:
+  en: 8b95a7237db3bac5
+  zh: 5f1e1f70b1213cb2
+/deepseek-ai-dsh-coding-preset/summary:
+  en: 4036613974075070
+  zh: c36276e48ec28569
+/deepseek-ai-dsh-coding-preset/table-of-contents:
+  en: d152484eb41ac6b4
+  zh: 09388d293f9be9cb
+/deepseek-ai-dsh-coding-preset/use-this-package:
+  en: 63d15eb6818a9a2f
+  zh: 9405f48b52eaa5fb
+/deepseek-ai-dsh-coding-preset/use-this-package/configuration:
+  en: d2c0a0444b5a7e89
+  zh: c9d3d6f8396f5d1e
+/deepseek-ai-dsh-coding-preset/use-this-package/selection-and-delegation:
+  en: 391a555256c76d76
+  zh: c6eac979905b9fab
+/deepseek-ai-dsh-coding-preset/understand-the-implementation:
+  en: f34c8f919ec0662a
+  zh: 76cb0a3f73ec6fde
+/deepseek-ai-dsh-coding-preset/further-exploration:
+  en: 5526d013998c3eb4
+  zh: 60b1a92cd291b378
+/deepseek-ai-dsh-coding-preset/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-coding-preset/model-experience/coding-delegation-policy:
+  en: 96da158b0a961660
+  zh: 6e44d19c7f710d34
+/deepseek-ai-dsh-coding-preset/model-experience/coding-delegation-policy/what-the-model-sees:
+  en: 6e81bffcdf1215be
+  zh: d91954832af9c498
+/deepseek-ai-dsh-coding-preset/model-experience/coding-delegation-policy/token-effect:
+  en: 22ed8f7a2af7ec2f
+  zh: fb4bcdef493ba2aa
+/deepseek-ai-dsh-coding-preset/model-experience/coding-delegation-policy/kv-cache-effect:
+  en: 3c556a7984a85884
+  zh: 43f04b9c3304c445
+/deepseek-ai-dsh-coding-preset/known-limitations-and-deferred-work:
+  en: d968b0060022894c
+  zh: 314ac1187e35dcdf
+/deepseek-ai-dsh-coding-preset/known-limitations-and-deferred-work/dev-note:
+  en: e67f633dc6fe7773
+  zh: 3bb0c20c93f16f98

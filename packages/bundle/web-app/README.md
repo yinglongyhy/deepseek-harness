@@ -57,7 +57,9 @@ The `minimal` agent preset uses a persistent shell, the `read_image` tool, and a
 | `surfaceContext` | `true` | Expose `DSH_WEB_URL` to the agent's shell commands |
 | `publicUrl` | Unset | Advertised HTTP(S) application root; otherwise announce the bind-address URL |
 
-The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-web-app) lists this runtime plugin's accepted fields and their JSDoc. The shipped composition inserts the `schedule` service row and the `ui-schedule` task page row, while the clock reading and the four reminder tools belong to the `standard`, `cordis`, and `ptc` presets. The `tool-subagent` and `tool-subagent-fork` rows in those presets deny the four tools, so a delegated child's scope never lists them.
+The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-web-app) lists this runtime plugin's accepted fields and their JSDoc. The shipped composition inserts the `schedule` service row and the `ui-schedule` task page row, while the clock reading and the four reminder tools belong to the `standard`, `coding`, `cordis`, and `ptc` presets. The `tool-subagent` and `tool-subagent-fork` rows in those presets deny the four tools, so a delegated child's scope never lists them.
+
+**Coding mode** (`coding`) derives from the current shipped PTC patch when its plugin loads, retaining all PTC plugins, including PTC mode, and its persona text, then appending the four-level delegation policy. Select it for a new task; Standard remains the default. Source-patch changes apply on a later plugin load, while existing Sessions keep their sampled setup. The prompt policy is guidance, not runtime enforcement. Before starting a Coding task that delegates, enable model selection in **Settings → Subagents** and allow `openai-codex/gpt-6-luna` and `openai-codex/gpt-6.1-sol`; both routes must be available. The preset changes neither Host preferences nor provider credentials. See the [Coding preset package](../../preset/coding-preset/README.md) for its source compatibility requirements.
 
 <a id="public-deployments"></a>
 ### Listening, trust, and public deployments
@@ -120,7 +122,7 @@ The URL line and browser handoff are readiness signals: supervisors RPC as soon 
 | [`src/public-url.ts`](src/public-url.ts) | Advertised-root validation and trailing-slash normalization; a leaf module for local imports, not package API |
 | [`src/startup.ts`](src/startup.ts) | The `web-startup` provider: `--host`, `--port`, `--tls-cert`, `--tls-key`, `--public-url`, `--trusted-host`, `--no-open`, `--help` |
 | [`cordis.patch.yml`](cordis.patch.yml) | The web patch: restated base values, web host rows, browser roster, preset registry |
-| [`presets/`](presets) | One `@deepseek-ai/dsh-agent-preset` declaration per shipped preset (`standard`, `ptc`, `minimal`, `cordis`), each its own patch file |
+| [`presets/`](presets) | One `@deepseek-ai/dsh-agent-preset` declaration each for `standard`, `ptc`, `minimal`, and `cordis`; the Coding patch loads `@deepseek-ai/dsh-coding-preset`, which registers the derived `coding` preset |
 | [`tests/web-app.spec.ts`](tests/web-app.spec.ts) | Dist index anchoring, advertised-URL publication and warnings, bash variable, readiness publication |
 | [`tests/startup.spec.ts`](tests/startup.spec.ts) | Command-line parsing over a real Loader tree |
 | [`tests/public-url.spec.ts`](tests/public-url.spec.ts) | Advertised-root parsing and normalization |

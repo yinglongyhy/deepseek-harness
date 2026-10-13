@@ -25,11 +25,12 @@ This group declares Agent capabilities through ordinary Cordis configuration and
 | [agent-preset-registry](agent-preset-registry/README.md) | Selection, revision retention and profile editing | `ctx.agentPresets` |
 | [agent-preset](agent-preset/README.md) | Declarative child plugins and metadata | — |
 | [persona](persona/README.md) | Composable Agent persona | — |
+| [coding-preset](coding-preset/README.md) | Independent Coding preset derived from the shipped PTC patch | — |
 
 <a id="related-documentation"></a>
 ## Related documentation
 
-- [Scope](../../docs/subsystems/scope.md)
+- [Scope subsystem](../../docs/subsystems/scope.md) — registration isolation shared by preset packages.
 - [Cordis](../../docs/cordis-primer.md)
 - [Agent preset](../../.agents/notes/implemented/architecture/2026-09-18-declarative-agent-presets.md)
 

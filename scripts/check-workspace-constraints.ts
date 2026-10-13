@@ -208,6 +208,8 @@ const packageFileExtras: Readonly<Record<string, readonly string[]>> = {
   '@deepseek-ai/dsh-experimental-inspector': ['lib/client.*.js', 'lib/worker.js', 'lib/devtools/**'],
   // Creator's composition guidance travels with the declaration package.
   '@deepseek-ai/dsh-agent-preset': ['skills'],
+  // Coding reads its prompt policy from the package at load.
+  '@deepseek-ai/dsh-coding-preset': ['policy.md'],
   // The Web Host mounts the default-off settings owner independently of each
   // Agent-scoped delegation-tool instance.
   '@deepseek-ai/dsh-tool-subagent': ['lib/model-selection-settings.js'],

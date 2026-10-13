@@ -470,6 +470,20 @@ it('requires both physical Client entries only for opted-in packages', () => {
   }
 })
 
+it('requires the Coding policy asset and rejects unrelated publication files', () => {
+  const dir = 'packages/preset/coding-preset'
+  const manifest = JSON.parse(readFileSync(new URL(`../${dir}/package.json`, import.meta.url), 'utf8')) as WorkspaceManifest['manifest']
+  expect(checkWorkspaceManifest({ dir, manifest })).toEqual([])
+  expect(expectedDshPackageFiles(manifest)).toEqual(['lib/index.js', 'policy.md', 'lib/types/**/*.d.ts'])
+  for (const files of [
+    ['lib/index.js', 'lib/types/**/*.d.ts'],
+    ['lib/index.js', 'policy.md', 'lib/extra.js', 'lib/types/**/*.d.ts'],
+  ]) {
+    expect(checkWorkspaceManifest({ dir, manifest: { ...manifest, files } }))
+      .toEqual([expect.stringContaining('package.json files must be')])
+  }
+})
+
 it('requires the standalone shortcut protocol and rejects unrelated runtime files', () => {
   const dir = 'packages/client/shortcuts'
   const manifest = JSON.parse(readFileSync(new URL(`../${dir}/package.json`, import.meta.url), 'utf8')) as WorkspaceManifest['manifest']

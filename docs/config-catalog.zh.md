@@ -685,6 +685,23 @@ export type ThemePreference = typeof THEME_PREFERENCES[number]
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-client-ui-theme -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-coding-preset -->
+<a id="deepseek-aidsh-coding-preset"></a>
+
+## `@deepseek-ai/dsh-coding-preset`
+
+- `inject`: `agentPresets`
+- `source`: [`packages/preset/coding-preset/src/index.ts:12`](../packages/preset/coding-preset/src/index.ts)
+
+```ts config-catalog
+/** The bundle supplies the current PTC declaration without a reverse package dependency. */
+export interface Config {
+  /** Absolute path to the shipped PTC patch, not the user's edited preset. */
+  ptcPresetPath: string
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-coding-preset -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-compaction-basic -->
 <a id="deepseek-aidsh-compaction-basic"></a>
 

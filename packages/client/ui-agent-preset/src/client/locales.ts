@@ -15,6 +15,8 @@ export type AgentPresetSettingsKey =
   | 'view'
   | 'presetStandardName'
   | 'presetStandardDescription'
+  | 'presetCodingName'
+  | 'presetCodingDescription'
   | 'presetPtcName'
   | 'presetPtcDescription'
   | 'presetMinimalName'
@@ -50,6 +52,8 @@ export const en: Record<AgentPresetSettingsKey, string> = {
   presetStandardName: 'Standard mode',
   presetStandardDescription:
     'Work with code, files, and information. Suitable for most tasks, with search, editing, terminal commands, and other tools available as needed.',
+  presetCodingName: 'Coding mode',
+  presetCodingDescription: 'PTC tool batching with prompt-guided four-level subagent delegation for coding tasks. Explicit model selection requires enabled, allowed model routes in Subagents settings.',
   presetPtcName: 'PTC mode',
   presetPtcDescription:
     'Includes all Standard mode capabilities. Better suited to tasks that call tools in batches and then filter, organize, deduplicate, count, or summarize the results.',
@@ -94,6 +98,8 @@ export const zh: Record<AgentPresetSettingsKey, string> = {
 
   presetStandardName: '标准模式',
   presetStandardDescription: '处理代码、文件和资料，适合大多数任务。Agent 会按需使用检索、编辑和终端等工具。',
+  presetCodingName: 'Coding 模式',
+  presetCodingDescription: '基于 PTC 批量调用工具，通过提示词指导编程任务的四级子代理委派。指定模型需先在子代理设置中启用并允许相应模型路由。',
   presetPtcName: 'PTC 模式',
   presetPtcDescription: '包含标准模式的所有能力，更适合批量调用工具，并对结果进行筛选、整理、去重、统计或汇总的任务。',
   presetMinimalName: '极简模式',

@@ -36,6 +36,7 @@
     "lib/startup.js",
     "cordis.patch.yml",
     "presets/standard.patch.yml",
+    "presets/coding.patch.yml",
     "presets/ptc.patch.yml",
     "presets/minimal.patch.yml",
     "presets/cordis.patch.yml",
@@ -48,6 +49,7 @@
       "patch": [
         "./cordis.patch.yml",
         "./presets/standard.patch.yml",
+        "./presets/coding.patch.yml",
         "./presets/ptc.patch.yml",
         "./presets/minimal.patch.yml",
         "./presets/cordis.patch.yml"
@@ -58,6 +60,7 @@
     "@deepseek-ai/dsh-llm-codex-account": "workspace:*",
     "@deepseek-ai/dsh-agent-instructions": "workspace:*",
     "@deepseek-ai/dsh-agent-preset": "workspace:*",
+    "@deepseek-ai/dsh-coding-preset": "workspace:*",
     "@deepseek-ai/dsh-agent-preset-registry": "workspace:*",
     "@deepseek-ai/dsh-agent-tool-presentation": "workspace:*",
     "@deepseek-ai/dsh-api-job-controller": "workspace:*",

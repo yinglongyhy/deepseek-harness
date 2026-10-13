@@ -1,0 +1,6 @@
+# Coding derives the shipped PTC declaration at load; no copied child plugin list.
+- insert:
+    - id: preset-coding
+      name: '@deepseek-ai/dsh-coding-preset'
+      config:
+        ptcPresetPath: !!js process.getBuiltinModule('node:module').createRequire(baseUrl).resolve('@deepseek-ai/dsh-web-app/presets/ptc.patch.yml')
