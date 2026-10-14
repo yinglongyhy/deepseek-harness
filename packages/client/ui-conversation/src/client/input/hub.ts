@@ -23,6 +23,8 @@ import type {
 import type { ComposerKeyboard } from '../contract/draft-editor.ts'
 import type { InputSubmitMode } from '../contract/composer-submission.ts'
 import type { PopupDismissFace } from './facade.ts'
+import type { CapturedConversationSubmission } from '../contract/contributions.ts'
+import type { SubmissionContributionRegistry } from '../submission-contributions.ts'
 import { SessionInputShell } from './facade.ts'
 import { reportMessageSubmission } from './submission-analytics.ts'
 import { readConversationDraft } from '../stores.ts'
@@ -40,12 +42,14 @@ interface InputTriggerServiceFace {
 
 /** Attachment-send face resolved lazily to keep hub/service construction acyclic. */
 interface ConversationAttachmentFace {
+  readonly submissions?: SubmissionContributionRegistry
   sendSession(
     session: SessionFace,
     text: string,
     attachmentIds: readonly DraftAttachmentId[],
     mode: InputSubmitMode,
     signal?: AbortSignal,
+    capture?: CapturedConversationSubmission,
   ): Promise<SubmitOutcome>
   serializeDraftAttachments(attachmentIds: readonly DraftAttachmentId[]): Promise<DraftAttachmentSerializationResult>
   releaseDraftAttachment(id: DraftAttachmentId): void
@@ -62,6 +66,7 @@ export class InputHub implements SessionInputResolver {
   constructor(
     private readonly rootCtx: Context,
     private readonly t: TranslateNS<'conversation'>,
+    private readonly submissions?: SubmissionContributionRegistry,
   ) {}
 
   /**
@@ -119,7 +124,18 @@ export class InputHub implements SessionInputResolver {
       inputTriggers: () => this.controller(actx),
       popup: () => this.popup(actx),
       inbox: session.projections.faceOf('inbox') as ObservableSnapshot<InboxState | undefined>,
-      defaultSink: (text, attachmentIds, mode, signal) => this.sink(session, text, attachmentIds, mode, signal),
+      contributions: (this.submissions ?? this.conversation().submissions)?.storeFor(session.sessionId),
+      captureSubmission: (text, ids, mode, source) => (this.submissions ?? this.conversation().submissions)?.capture(session.sessionId, text, ids, mode, source ?? 'programmatic'),
+      bindSubmission: (capture, signal) => (this.submissions ?? this.conversation().submissions)?.bindCapture(capture, signal) ?? signal,
+      trackSubmission: (capture, signal, execute) => {
+        const submissions = this.submissions ?? this.conversation().submissions
+        if (submissions === undefined) return execute(signal)
+        return submissions.trackCapture(capture, signal, execute).finally(() => { submissions.releaseCapture(capture) })
+      },
+      trackAdjudication: (capture, signal, execute) =>
+        (this.submissions ?? this.conversation().submissions)?.trackCapture(capture, signal, execute) ?? execute(signal),
+      releaseSubmission: (capture) => { (this.submissions ?? this.conversation().submissions)?.releaseCapture(capture) },
+      defaultSink: (text, attachmentIds, mode, signal, capture) => this.sink(session, text, attachmentIds, mode, signal, capture),
       steerQueue: () => { void this.steerQueue(session, shell) },
       commandAttachments: {
         serialize: async (ids) => {
@@ -236,9 +252,10 @@ export class InputHub implements SessionInputResolver {
     attachmentIds: readonly DraftAttachmentId[],
     mode: InputSubmitMode,
     signal: AbortSignal,
+    capture?: CapturedConversationSubmission,
   ): Promise<SubmitOutcome> {
-    if (text === '' && attachmentIds.length === 0) return Promise.resolve({ kind: 'success' })
-    return this.conversation().sendSession(session, text, attachmentIds, mode, signal)
+    if (text === '' && attachmentIds.length === 0 && (capture?.contributions.length ?? 0) === 0) return Promise.resolve({ kind: 'success' })
+    return this.conversation().sendSession(session, text, attachmentIds, mode, signal, capture)
   }
 
   /**

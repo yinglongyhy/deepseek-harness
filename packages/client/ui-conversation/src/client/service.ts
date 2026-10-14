@@ -24,13 +24,17 @@ import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type {
   ComposerAttachment, ComposerFileAttachment, ComposerImageAttachment, DraftFileUpload,
 } from './contract/slots.ts'
-import type { QueueAction } from '@deepseek-ai/dsh-api-session-controller/types'
+import type { QueueAction, SessionRequestId } from '@deepseek-ai/dsh-api-session-controller/types'
 import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
 import type { ComposerBlocks } from './contract/composer-blocks.ts'
 import type {
   DraftAttachmentId, DraftAttachmentSerializationResult, SessionInputResolver, SubmitAttachment, SubmitOutcome,
 } from './contract/input.ts'
 import type { InputSubmitMode } from './contract/composer-submission.ts'
+import type {
+  CapturedConversationSubmission, ConversationSubmissionAttempt, ConversationSubmissions, SubmissionContribution,
+} from './contract/contributions.ts'
+import { SubmissionContributionRegistry } from './submission-contributions.ts'
 
 /**
  * The outward conversation face (`ctx.conversation`): the scope-addressed
@@ -45,8 +49,30 @@ export interface IConversation {
    * cannot import makes a session's input inert with its own reason.
    */
   readonly blocks: ComposerBlocks
+  /** Immutable submission records and caller-owned history reconciliation. */
+  readonly submissions: ConversationSubmissions
   /**
-   * Send a prompt into the caller scope's session (queued turn).
+   * Register a draft contribution under the calling plugin's lifetime.
+   * @param sessionId - target Session.
+   * @param contribution - owner draft and callbacks.
+   * @returns an owner-scoped disposer that closes callbacks, awaits quiescence, and reports outstanding operation failures.
+   */
+  registerContribution(sessionId: SessionId, contribution: SubmissionContribution): () => Promise<void>
+  /**
+   * Retry the identical request without minting a replacement id or reading current drafts.
+   * Unfinished in-process preparation repeats; fresh restores prepare every captured owner idempotently before admission.
+   * @param attempt - retained or restored immutable request; content conflicts throw.
+   * @param signal - optional cancellation.
+   * @param transportAttachments - optional ordered restaged file receipts; image values remain identical.
+   * @returns the same-request Host admission outcome; accepted settlement errors never imply rejection.
+   */
+  retrySubmission(
+    attempt: ConversationSubmissionAttempt,
+    signal?: AbortSignal,
+    transportAttachments?: readonly SubmitAttachment[],
+  ): Promise<SubmitOutcome>
+  /**
+   * Queue only the supplied text into the caller scope's Session, without composer drafts or contributions.
    * @param text - prompt text, sent verbatim as one text block.
    * @returns completion; business failures reject (and land in promptError).
    */
@@ -155,9 +181,16 @@ export class ConversationController extends Service implements IConversation {
   readonly input: SessionInputResolver
   /** The per-session composer-block registry. */
   readonly blocks: ComposerBlocks
+  /** Immutable request registry shared with the resident composer. */
+  readonly submissions: SubmissionContributionRegistry
   /** Live upload state per file-kind draft; images never appear here. */
   readonly fileUploads: SnapshotStore<Record<string, DraftFileUpload>> = createSnapshotStore<Record<string, DraftFileUpload>>({})
   private readonly draftAttachments = new Map<DraftAttachmentId, ComposerAttachment>()
+  /** Exact-attempt retry resources, released by observed echo retirement or service disposal. */
+  private readonly submissionDrafts = new Map<SessionRequestId, {
+    attachments: readonly ComposerAttachment[]
+    pendingAttachments: Parameters<SessionFace['beginSubmission']>[0]['attachments']
+  }>()
   private readonly fileUploadOperations = new Map<DraftAttachmentId, {
     readonly controller: AbortController
     readonly done: Promise<void>
@@ -180,11 +213,14 @@ export class ConversationController extends Service implements IConversation {
   constructor(ctx: Context, config: {
     input: SessionInputResolver
     blocks: ComposerBlocks
+    submissions?: SubmissionContributionRegistry
     maxConcurrentFileUploads: number
   }) {
     super(ctx, 'conversation')
     this.input = config.input
     this.blocks = config.blocks
+    this.submissions = config.submissions ?? new SubmissionContributionRegistry()
+    ctx.effect(() => () => this.submissions.dispose(), 'conversation submission contributions')
     this.maxConcurrentFileUploads = config.maxConcurrentFileUploads
     ctx.effect(() => async () => {
       const operations = [...this.fileUploadOperations.values()]
@@ -196,14 +232,14 @@ export class ConversationController extends Service implements IConversation {
         if (attachment.kind === 'image') revokePreview(attachment.previewUrl)
       }
       this.draftAttachments.clear()
+      this.submissionDrafts.clear()
       this.fileUploads.set({})
     }, 'conversation draft attachments')
   }
 
   /**
-   * Send a prompt into the scoped session. Business failures also land in the
-   * session snapshot's promptError (object-layer state); the rejection here
-   * exists for caller choreography (the composer restores the draft on it).
+   * Send only the supplied text into the scoped Session, without composer drafts or contributions.
+   * Business failures update Session promptError and reject this callback.
    * @param text - prompt text, sent verbatim as one text block.
    */
   async send(text: string): Promise<void> {
@@ -213,17 +249,18 @@ export class ConversationController extends Service implements IConversation {
   }
 
   /**
-   * Submit ordered draft attachments with text through one host admission. A local
-   * submission echo enters the session snapshot synchronously; serialization
-   * and the prompt round-trip start after the browser can paint it. On the
-   * echo's observed retirement seeds admitted image previews into the durable
-   * cache and removes every attachment from the draft registry. On failure,
-   * every attachment remains registered so the composer can restore it.
+   * Submit ordered draft attachments and frozen contributions through one Host admission.
+   * Contributions complete durable preparation before the pending echo and prompt;
+   * their acceptance does not wait for echo retirement. Submissions without contributions
+   * retain the existing synchronous echo and attachment-retirement behavior.
+   * Observed retirement releases draft attachments and seeds admitted image previews;
+   * failures retain attachment ownership for definitive restoration or same-id retry.
    * @param session - target session.
    * @param text - serialized prompt text.
    * @param attachmentIds - ordered draft-local attachment ids.
    * @param mode - queue or steer delivery selected by composer policy.
    * @param signal - optional cancellation for the complete Host admission.
+   * @param capture - ordinary gesture's synchronous snapshot; absent means a programmatic snapshot at this call.
    * @returns the Host admission outcome; local attachment preparation failures reject.
    */
   async sendSession(
@@ -232,61 +269,146 @@ export class ConversationController extends Service implements IConversation {
     attachmentIds: readonly DraftAttachmentId[],
     mode: InputSubmitMode,
     signal?: AbortSignal,
+    capture?: CapturedConversationSubmission,
   ): Promise<SubmitOutcome> {
-    const attachments = this.resolveDraftAttachments(attachmentIds)
-    if (attachments.length !== attachmentIds.length) {
-      throw new Error('conversation.sendSession: one or more draft attachments are no longer available')
-    }
-    const uploads = this.fileUploads.getSnapshot()
-    const uploadFor = (attachment: ComposerFileAttachment): Extract<DraftFileUpload, { status: 'ready' }> => {
-      const upload = uploads[attachment.id]
-      if (upload === undefined || upload.status !== 'ready') {
-        throw new Error('conversation.sendSession: one or more files have not finished uploading')
-      }
-      return upload
-    }
-    const pendingAttachments = attachments.map(attachment => attachment.kind === 'image'
-      ? {
-        type: 'image' as const,
-        value: {
-          previewUrl: attachment.previewUrl,
-          ...(attachment.file.name === '' ? {} : { name: attachment.file.name }),
-          ...(attachment.width === undefined ? {} : { width: attachment.width }),
-          ...(attachment.height === undefined ? {} : { height: attachment.height }),
-        },
-      }
-      : { type: 'file' as const, value: uploadFor(attachment).file })
-    const serializeAttachments = (): Promise<Parameters<SessionFace['prompt']>[0]> => Promise.all(
-      attachments.map(async attachment => attachment.kind === 'image'
-        ? { type: 'image' as const, ...await this.encodeImage(attachment.file) }
-        : { type: 'file' as const, receiptId: uploadFor(attachment).receiptId }),
-    )
-    let finishRetirement: ((retirement: PendingSubmissionRetirement) => void) | undefined
-    const retirement = attachments.length === 0
-      ? undefined
-      : new Promise<PendingSubmissionRetirement>((resolve) => { finishRetirement = resolve })
-    const submission = session.beginSubmission({
-      mode,
-      text,
-      attachments: pendingAttachments,
-      onRetire: (settlement) => {
-        this.settleSubmittedAttachments(session.sessionId, attachments, settlement)
-        finishRetirement?.(settlement)
-      },
-    })
-    let content: Parameters<SessionFace['prompt']>[0]
+    capture ??= this.submissions.capture(session.sessionId, text, attachmentIds, mode, 'programmatic')
     try {
-      await nextPaint()
-      const uploaded = await serializeAttachments()
-      content = [...uploaded, ...(text === '' ? [] : [{ type: 'text' as const, text }])]
+      const attachments = this.resolveDraftAttachments(attachmentIds)
+      if (attachments.length !== attachmentIds.length) {
+        throw new Error('conversation.sendSession: one or more draft attachments are no longer available')
+      }
+      const uploads = this.fileUploads.getSnapshot()
+      const uploadFor = (attachment: ComposerFileAttachment): Extract<DraftFileUpload, { status: 'ready' }> => {
+        const upload = uploads[attachment.id]
+        if (upload === undefined || upload.status !== 'ready') {
+          throw new Error('conversation.sendSession: one or more files have not finished uploading')
+        }
+        return upload
+      }
+      const pendingAttachments = attachments.map(attachment => attachment.kind === 'image'
+        ? {
+          type: 'image' as const,
+          value: {
+            previewUrl: attachment.previewUrl,
+            ...(attachment.file.name === '' ? {} : { name: attachment.file.name }),
+            ...(attachment.width === undefined ? {} : { width: attachment.width }),
+            ...(attachment.height === undefined ? {} : { height: attachment.height }),
+          },
+        }
+        : { type: 'file' as const, value: uploadFor(attachment).file })
+      const serializeAttachments = (): Promise<Parameters<SessionFace['prompt']>[0]> => Promise.all(
+        attachments.map(async attachment => attachment.kind === 'image'
+          ? { type: 'image' as const, ...await this.encodeImage(attachment.file) }
+          : { type: 'file' as const, receiptId: uploadFor(attachment).receiptId }),
+      )
+      const snapshot = session.getSnapshot()
+      if (snapshot.subagent !== null) {
+        const submission = session.beginSubmission({
+          requestId: capture.requestId, mode, text, attachments: pendingAttachments,
+          onRetire: this.submissionRetirement(session.sessionId, capture.requestId, attachments),
+        })
+        const uploaded = await serializeAttachments()
+        const content = [...uploaded, ...(text === '' ? [] : [{ type: 'text' as const, text }])]
+        const result = await session.prompt(content, mode, signal, submission.requestId)
+        if (!result.ok) submission.abandon()
+        this.submissions.releaseCapture(capture)
+        return result.ok ? { kind: 'success' } : { kind: 'error' }
+      }
+      // With no owners, echo registration does not precede any required preparation.
+      const submission = capture.contributions.length === 0 ? session.beginSubmission({
+        requestId: capture.requestId, mode, text, attachments: pendingAttachments,
+        onRetire: this.submissionRetirement(session.sessionId, capture.requestId, attachments),
+      }) : undefined
+      const outcome = await this.submissions.submit(capture, signal, async () => {
+        if (submission !== undefined) await nextPaint()
+        const uploaded = await serializeAttachments()
+        const wireAttachments = uploaded.filter((part): part is Extract<typeof part, { type: 'image' | 'file' }> => part.type === 'image' || part.type === 'file')
+        return { text, attachments: wireAttachments }
+      }, (attempt, admissionSignal) => this.admitSubmission(session, attempt, admissionSignal, attachments, pendingAttachments))
+      if (outcome.admission === 'rejected') submission?.abandon()
+      return outcome
     } catch (error) {
-      submission.abandon()
+      this.submissions.releaseCapture(capture)
       throw error
     }
-    const result = await session.prompt(content, mode, signal, submission.requestId)
-    if (!result.ok) return { kind: 'error' }
-    if (retirement !== undefined && (await retirement).reason !== 'observed') return { kind: 'error' }
-    return { kind: 'success' }
+  }
+
+  /** @param sessionId - target Session. @param contribution - owner draft and callbacks. @returns scope-bound owner disposer. */
+  registerContribution(sessionId: SessionId, contribution: SubmissionContribution): () => Promise<void> {
+    let dispose: (() => Promise<void>) | undefined
+    this.ctx.effect(() => {
+      dispose = this.submissions.register(sessionId, contribution)
+      return dispose
+    }, `conversation contribution ${contribution.id}`)
+    return async () => { await dispose?.() }
+  }
+
+  /**
+   * @param attempt - retained or restored immutable content.
+   * @param signal - optional cancellation.
+   * @param transportAttachments - ordered restaged file receipts; image values must remain identical.
+   * @returns same-request admission outcome after captured-owner preparation.
+   */
+  retrySubmission(
+    attempt: ConversationSubmissionAttempt,
+    signal?: AbortSignal,
+    transportAttachments?: readonly SubmitAttachment[],
+  ): Promise<SubmitOutcome> {
+    const frozen = this.submissions.restore(attempt)
+    const sessions = this.ctx.get('sessions')
+    const session = sessions?.binding(frozen.sessionId)?.session
+    if (session === undefined) return Promise.reject(new Error('submission Session unavailable'))
+    const wireAttachments = Object.freeze((transportAttachments ?? frozen.attachments).map(attachment => Object.freeze({ ...attachment })))
+    if (wireAttachments.length !== frozen.attachments.length || frozen.attachments.some((original, index) => {
+      const replacement = wireAttachments[index]
+      return replacement === undefined || original.type !== replacement.type
+        || (original.type === 'image' && (replacement.type !== 'image' || original.data !== replacement.data
+          || original.mediaType !== replacement.mediaType || original.name !== replacement.name))
+    })) return Promise.reject(new Error('retry may replace only file receipts in their original positions'))
+    return this.submissions.run(frozen, signal,
+      admissionSignal => this.admitSubmission(session, frozen, admissionSignal, undefined, undefined, wireAttachments), false)
+  }
+
+  private async admitSubmission(
+    session: SessionFace,
+    attempt: ConversationSubmissionAttempt,
+    signal: AbortSignal,
+    attachments: readonly ComposerAttachment[] = this.submissionDrafts.get(attempt.requestId)?.attachments ?? [],
+    pendingAttachments: Parameters<SessionFace['beginSubmission']>[0]['attachments'] = this.submissionDrafts.get(attempt.requestId)?.pendingAttachments ?? [],
+    wireAttachments: readonly SubmitAttachment[] = attempt.attachments,
+  ): Promise<import('./contract/contributions.ts').ConversationSubmissionStatus> {
+    if (attachments.length > 0) this.submissionDrafts.set(attempt.requestId, { attachments, pendingAttachments })
+    const snapshot = session.getSnapshot()
+    if (snapshot.subagent === null && !snapshot.pendingSubmissions.some(pending => pending.requestId === attempt.requestId)) {
+      try {
+        session.beginSubmission({
+          requestId: attempt.requestId, mode: attempt.mode, text: attempt.text, attachments: pendingAttachments,
+          onRetire: this.submissionRetirement(session.sessionId, attempt.requestId, attachments),
+        })
+      } catch (_error) {
+        // No Host call happened; duplicate pending echoes and local admission errors are definite rejection.
+        return 'rejected'
+      }
+    }
+    const content = [...wireAttachments.map(attachment => attachment.type === 'file'
+      ? { ...attachment, receiptId: attachment.receiptId as Extract<Parameters<SessionFace['prompt']>[0][number], { type: 'file' }>['receiptId'] }
+      : { ...attachment }), ...(attempt.text === '' ? [] : [{ type: 'text' as const, text: attempt.text }])]
+    const result = await session.prompt(content, attempt.mode, signal, attempt.requestId)
+    // Gateway failures do not establish whether the Host admitted the request.
+    if (!result.ok && (result.error.code === 'session/prompt-uncertain'
+      || (result.error.code.startsWith('gateway/') && result.error.code !== 'gateway/bad-request'))) return 'uncertain'
+    return result.ok ? 'accepted' : 'rejected'
+  }
+
+  private submissionRetirement(
+    sessionId: SessionId,
+    requestId: SessionRequestId,
+    attachments: readonly ComposerAttachment[],
+  ): NonNullable<Parameters<SessionFace['beginSubmission']>[0]['onRetire']> {
+    return (settlement) => {
+      this.settleSubmittedAttachments(sessionId, attachments, settlement)
+      if (settlement.reason === 'observed') this.submissionDrafts.delete(requestId)
+    }
   }
 
   /**

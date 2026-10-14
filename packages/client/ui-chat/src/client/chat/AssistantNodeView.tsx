@@ -2,14 +2,16 @@ import { memo, useCallback, useMemo } from 'react'
 import type { InjectFace, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ChatNodeViewProps, PresentationInjected, TurnTailOwnerProps } from '../contract/slots.ts'
 import { AssistantMarkdown } from './AssistantMarkdown.tsx'
+import type { ChatTextInjected } from '../text-host.ts'
+import type { SessionSeq } from '@deepseek-ai/dsh-session/types'
 
 type AssistantNodeViewProps = ChatNodeViewProps<'assistant-step'> & InjectFace<PresentationInjected>
-  & PropsRenderSlots<'conversation.chat.reasoning.body' | 'conversation.chat.message.images'>
+  & PropsRenderSlots<'conversation.chat.reasoning.body' | 'conversation.chat.message.images'> & Partial<ChatTextInjected>
 
 /** Streaming, settled, and interrupted Assistant states share one keyed renderer instance. */
 export const AssistantNodeView = memo(function AssistantNodeView({
   node, groupPart, useDisclosure, useGroupAction, useTurnData, turnProcess, openFile, loadImage, fileMentions,
-  usePresentation, renderSlot, t,
+  usePresentation, renderSlot, t, sessionId, registerText,
 }: AssistantNodeViewProps) {
   const data = node.data
   const turn = node.location.kind === 'turn' || node.location.kind === 'step'
@@ -34,6 +36,10 @@ export const AssistantNodeView = memo(function AssistantNodeView({
   return (
     <AssistantMarkdown
       blocks={data.blocks}
+      registerText={registerText}
+      textSource={data.status === 'settled' && data.finalNode?.messageId !== undefined
+        ? { sessionId, messageId: data.finalNode.messageId, seq: data.finalNode.seq as SessionSeq }
+        : undefined}
       groupPart={groupPart}
       useDisclosure={useDisclosure}
       streaming={data.status === 'running'}

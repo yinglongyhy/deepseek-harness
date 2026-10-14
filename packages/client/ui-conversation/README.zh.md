@@ -114,6 +114,12 @@ Send 和 Stop 按钮禁用时不显示提示气泡，轮次结束后由 Stop 切
 
 在获得焦点的 Chat 或 Composer 中连续独立按下两次 Esc，可停止当前运行轮次并保留排队消息。间隔由 shortcuts 插件的 `stopSequenceMs` 配置决定，默认 500 ms。菜单、审批、模态层、终端、内嵌网页、输入法、重复按键，以及输入区域、Session 或轮次变化会清空序列。快捷键与 Stop 按钮调用同一作用域取消操作。插件将 Stop 注册为 `input` 展示分组中的固定操作。该注册使普通 Esc 不能分配给可编辑快捷键，并为 Stop 按钮的悬停和键盘聚焦提示提供 `Esc Esc` 序列。
 
+输入框的普通 queue/steer 发送和 `sendSession` 在异步序列化之前预留不可变的请求标识、有序附件、引用 chip 和 contribution revision。较低层的 scoped `send(text)` 只发送传入文本，不组装输入框草稿或 contribution。`conversation.registerContribution(sessionId, contribution)` 是 Cordis effect，其异步 disposer 会取消并等待 owner 操作结束；`conversation.input.summary` 是摘要 slot。所有 owner 必须完成 `prepare` 才能进入 Host 准入。`settle` 接收 accepted/rejected/uncertain；accepted handler 只清除与捕获 revision 匹配的内容，保留新编辑。准备失败阻止准入，settlement 失败保持可见且不降级已经接受的结果。已认领的命令和 subagent continuation 维持独立发送路径。跨端消费者从仅含类型的 `/contribution-identity` 入口导入 contribution 标识，`/client` 保留类型别名。
+
+`conversation.submissions` 通过 `storeFor` 提供稳定的发送资格来源，通过 `attemptFor` 查询不可变请求，并通过 `restore`/`reconcile` 恢复和对账由 owner 持久化的 attempt。缺少历史、缺少 ACK 或 echo 退出均不构成拒绝证据。uncertain attempt 保留原标识和提交值。`retrySubmission(attempt, signal?, transportAttachments?)` 要求原 attempt 和当前 owner；只允许在原有顺序中替换经过授权重新暂存的 file receipt，不得改变图片、文本或 contribution revision。恢复或替换的 owner 在捕获操作结束后会再次 prepare；缺少 owner 会阻止准入。accepted settlement 只重试尚未完成的 contribution id。registry 仅保存在内存中；业务 owner 在准入前持久化私有数据和准备好的文件引用。
+
+图片预览及原始图片/文件草稿引用在 rejected 或 uncertain 准入后保留，供原 attempt 重试。echo 被观测后的退出会释放这些引用，无论 echo 在序列化前还是准入时开始。
+
 <a id="temporary-composer-entries"></a>
 ## 临时 composer entry
 

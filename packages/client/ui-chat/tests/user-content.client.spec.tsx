@@ -4,6 +4,14 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { act, cleanup, fireEvent, type RenderResult, within } from '@testing-library/react'
 import { AttachmentId, type FileAttachmentRef, type ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { PendingSubmission } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { SessionRequestId } from '@deepseek-ai/dsh-api-session-controller/types'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import { MessageId } from '@deepseek-ai/dsh-llm/brand'
+import type { ChatNode } from '../src/client/contract/chat-nodes.ts'
+import {
+  UserMessageNodeView, UserMessagePresentationView, PendingUserMessageView, PendingUserMessagePresentationView,
+} from '../src/client/chat/MessageItem.tsx'
 import { SlotTestRuntime } from '@deepseek-ai/dsh-client-test-runtime'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
@@ -118,10 +126,74 @@ async function bench() {
     return { ...view, rerender: update }
   }
   const loadImage = vi.fn<UserContentInput['loadImage']>(async () => 'blob:loaded')
-  return { runtime, locale, owner, mountContent, factory, render, loadImage, imageCalls, SessionProvider, openFile, openSkill }
+  return { runtime, locale, owner, mountContent, factory, render, loadImage, imageCalls, SessionProvider, openFile, openSkill, seats }
+}
+
+function ProjectedUser({ node, loadImage, renderFactorySlot }: PropsRuntime<'conversation.chat.user-presentation'> & PropsRenderFactories) {
+  return renderFactorySlot('conversation.chat.user-message', { node, loadImage, text: 'Read @"src/my file.ts" with /review and @Alpha' })
+}
+
+function ProjectedPending({ input, loadImage, renderFactorySlot }: PropsRuntime<'conversation.chat.pending-user-presentation'> & PropsRenderFactories) {
+  return renderFactorySlot('conversation.chat.pending-user-message', { input, loadImage, text: 'Projected pending' })
 }
 
 describe('user Content Factory', () => {
+  it('projects durable and pending presentations without replacing text parsing or image ownership', async () => {
+    const b = await bench()
+    await b.runtime.mount({ inject: ['slots'], apply(ctx) {
+      ctx.slots.registerFactory({ name: 'conversation.chat.user-message', scope: 'session', locale: NS }, UserMessageNodeView)
+      ctx.slots.registerFactory({ name: 'conversation.chat.pending-user-message', scope: 'session', locale: NS }, PendingUserMessageView)
+      ctx.slots.registerFactory({ name: 'conversation.chat.user-message-presentation', scope: 'session',
+        children: { 'conversation.chat.user-presentation': { kind: 'chain', scope: 'session' } },
+      }, UserMessagePresentationView)
+      ctx.slots.registerFactory({ name: 'conversation.chat.pending-user-message-presentation', scope: 'session',
+        children: { 'conversation.chat.pending-user-presentation': { kind: 'chain', scope: 'session' } },
+      }, PendingUserMessagePresentationView)
+    } })
+    const node: ChatNode<'user'> = {
+      key: 'user:1', id: '1', target: 'chat', kind: 'user', anchorSeq: 1, visibility: 'visible',
+      location: { kind: 'session' }, groupTree: 'exchange',
+      data: { kind: 'user', seq: 1, time: 0, messageId: MessageId('user:1'), source: null,
+        referenceLabels: ['Alpha'], skillNames: ['review'], content: [
+          { type: 'text', text: 'Original model text' }, { type: 'image', attachment: image }, { type: 'file', attachment: file },
+        ] },
+    }
+    const factory = () => b.seats.renderFactorySlot('conversation.chat.user-message-presentation', { node, loadImage: b.loadImage })
+    const view = b.render(factory())
+    expect(view.getByText('Original model text')).toBeTruthy()
+    expect(view.getByTestId('image').textContent).toBe('history.png')
+    expect(view.getByTitle('notes.txt')).toBeTruthy()
+    const projection = await b.runtime.mount({ inject: ['slots'], apply(ctx) {
+      ctx.slots.register({ name: 'conversation.chat.user-presentation', select: () => true }, ProjectedUser)
+      ctx.slots.register({ name: 'conversation.chat.pending-user-presentation', select: () => true }, ProjectedPending)
+    } })
+    expect(view.queryByText('Original model text')).toBeNull()
+    fireEvent.click(view.getByRole('button', { name: 'my file.ts' }))
+    fireEvent.click(view.getByRole('button', { name: '/review' }))
+    expect(b.openFile).toHaveBeenCalledWith('src/my file.ts')
+    expect(b.openSkill).toHaveBeenCalledWith('review')
+    expect(view.getByText('Alpha', { exact: true })).toBeTruthy()
+    expect(view.getByTestId('image').textContent).toBe('history.png')
+    expect(view.getByTitle('notes.txt')).toBeTruthy()
+    expect(node.data.content[0]).toEqual({ type: 'text', text: 'Original model text' })
+    const input: PendingSubmission = {
+      requestId: brandString<SessionRequestId>('pending'), placement: 'steering', time: 0, text: 'Original pending',
+      attachments: [{ type: 'image', value: { previewUrl: 'blob:local-preview', name: 'preview.png' } }, { type: 'file', value: file }],
+    }
+    view.rerender(b.seats.renderFactorySlot('conversation.chat.pending-user-message-presentation', { input, loadImage: b.loadImage }))
+    expect(view.getByText('Projected pending')).toBeTruthy()
+    expect(view.getByTestId('image').textContent).toBe('preview.png')
+    expect(view.getByTitle('notes.txt')).toBeTruthy()
+    expect(view.container.querySelector('[data-submission-echo][data-pending-steering]')).not.toBeNull()
+    expect(input.text).toBe('Original pending')
+    expect(b.imageCalls.every(call => call.loadImage === b.loadImage)).toBe(true)
+    await projection.dispose()
+    expect(view.getByText('Original pending')).toBeTruthy()
+    expect(view.queryByText('Projected pending')).toBeNull()
+    view.rerender(factory())
+    expect(view.getByText('Original model text')).toBeTruthy()
+  })
+
   it('renders prepared text directly without a row, admission markers, time, or copy controls', async () => {
     const b = await bench()
     const text = '**literal user text**\nsecond line'

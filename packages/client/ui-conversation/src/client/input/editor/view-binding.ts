@@ -8,7 +8,10 @@ import { resolveSubmitMode } from '../submission-policy.ts'
 import { registerComposerKeymap } from './keymap.ts'
 
 interface DraftViewGate {
+  /** Read-only state: denies draft edits independently of contribution readiness. */
   locked: boolean
+  /** Submission denial, including read-only state and contribution readiness. */
+  sendLocked: boolean
   machineBusy: boolean
   canSteerQueue: boolean
   running: boolean
@@ -115,7 +118,7 @@ export function installDraftKeymap(
       return keyboard.space()
     },
     dismissPopup: () => { keyboard.dismissPopup() },
-    canSubmit: () => !gate.current.locked && !gate.current.machineBusy,
+    canSubmit: () => !gate.current.sendLocked && !gate.current.machineBusy,
     submit: (accelerated) => {
       const g = gate.current
       // Empty-draft accelerated Enter acts on the queue instead of the

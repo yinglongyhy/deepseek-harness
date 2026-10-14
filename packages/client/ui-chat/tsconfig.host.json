@@ -7,9 +7,11 @@
   },
   "files": [
     "src/chat-settings.ts",
-    "src/index.ts"
+    "src/index.ts",
+    "src/text-identities.ts"
   ],
   "references": [
+    { "path": "../../util/brand" },
     {
       "path": "../../../vendor/cordis"
     },

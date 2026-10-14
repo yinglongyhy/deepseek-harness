@@ -189,23 +189,30 @@ describe('Session Controller access', () => {
     await Promise.all([guest.return?.(), owner.return?.()])
   })
 
-  it('records a non-owner caller on the prompt source and leaves owner sources unchanged', async () => {
-    const { shared, as } = await harness()
+  it('preserves caller and time zone sources across uncertain admission retries without duplicate insertion', async () => {
+    const { ctx, shared, as } = await harness()
+    const flush = vi.fn(async () => {})
+    ctx.on('session/flush', flush)
     const signal = new AbortController().signal
     const prompt = (principal: Principal, requestId: string) => as(principal, 'prompt').sessionController.prompt({
       sessionId: SHARED,
       requestId: requestId as SessionRequestId,
+      clientTimeZone: 'UTC',
       mode: 'queue',
       content: [{ type: 'text', text: `from ${principal.kind}` }],
     }, signal)
+    flush.mockRejectedValueOnce(new Error('disk unavailable'))
+    await expect(prompt(GUEST, 'guest-1')).rejects.toMatchObject({ code: 'session/prompt-uncertain' })
     await expect(prompt(GUEST, 'guest-1')).resolves.toEqual({ accepted: true })
     await expect(prompt(OWNER, 'owner-1')).resolves.toEqual({ accepted: true })
+    await expect(prompt(OWNER, 'owner-1')).resolves.toEqual({ accepted: true })
+    expect(flush).toHaveBeenCalledTimes(4)
     // The durable Inbox splice records each accepted message with its source.
     const logged = shared.session.snapshotEvents()
       .flatMap(event => event.type === 'agent/inbox/spliced' ? event.data.inserted.map(item => item.source) : [])
     expect(logged).toEqual([
-      { kind: 'user', rpcId: 'guest-1', principal: GUEST },
-      { kind: 'user', rpcId: 'owner-1' },
+      { kind: 'user', rpcId: 'guest-1', clientTimeZone: 'UTC', principal: GUEST },
+      { kind: 'user', rpcId: 'owner-1', clientTimeZone: 'UTC' },
     ])
   })
 

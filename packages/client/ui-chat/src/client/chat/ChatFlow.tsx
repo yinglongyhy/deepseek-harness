@@ -4,7 +4,6 @@ import { assertNever } from '@deepseek-ai/dsh-util-values'
 import type { ChatFlowSlotProps } from '../contract/slots.ts'
 import { ChatNodeSeat } from './ChatNodeSeat.tsx'
 import { ChatGroupSeat } from './ChatGroupSeat.tsx'
-import { PendingSteeringBubble, PendingSubmissionBubble } from './MessageItem.tsx'
 import { chatRenderKey } from './render-entry.ts'
 import { RunningStatus } from './RunningStatus.tsx'
 
@@ -41,12 +40,11 @@ export const ChatFlow = memo(function ChatFlow({
         return assertNever(entry)
     }
   })
-  const pendingRows = pendingInputs.map(item => 'requestId' in item ? (
-    <PendingSubmissionBubble key={item.requestId} submission={item}
-      loadImage={loadImage} renderFactorySlot={renderFactorySlot} t={t} />
-  ) : (
-    <PendingSteeringBubble key={item.id} content={item.content}
-      loadImage={loadImage} renderFactorySlot={renderFactorySlot} t={t} />
+  // Factory anchors use display:contents; each pending row owns its flow spacing.
+  const pendingRows = pendingInputs.map(item => (
+    <div key={'requestId' in item ? item.requestId : item.id}>
+      {renderFactorySlot('conversation.chat.pending-user-message-presentation', { input: item, loadImage })}
+    </div>
   ))
   const tail = entries.at(-1)
   const node = tail?.kind === 'node' ? nodeStore.get(tail.key) : undefined

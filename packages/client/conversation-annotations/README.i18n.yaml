@@ -1,0 +1,46 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/client/conversation-annotations/README.md
+/:
+  en: fb8c89091f4af2c1
+  zh: 57ff37d867b796d7
+/deepseek-ai-dsh-client-conversation-annotations:
+  en: 56b194ca27d454e4
+  zh: eb1218060502d0a6
+/deepseek-ai-dsh-client-conversation-annotations/summary:
+  en: a2b53963591a9b29
+  zh: 59519cd209638c5b
+/deepseek-ai-dsh-client-conversation-annotations/table-of-contents:
+  en: 63b42d19d152582c
+  zh: 283b822003b0434d
+/deepseek-ai-dsh-client-conversation-annotations/use-this-package:
+  en: 32e89d8fde63a9e2
+  zh: 42e39317132c9c3c
+/deepseek-ai-dsh-client-conversation-annotations/understand-the-implementation:
+  en: 9e417371a70b7bc4
+  zh: d395283efd2e4fc4
+/deepseek-ai-dsh-client-conversation-annotations/dev-note:
+  en: 28dd2f8bd07f0e30
+  zh: 53bddc69a1a0c894
+/deepseek-ai-dsh-client-conversation-annotations/further-exploration:
+  en: 7ac6a66d24b5e3cc
+  zh: ad7a24693efe3550
+/deepseek-ai-dsh-client-conversation-annotations/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-client-conversation-annotations/model-experience/submitted-annotation-context:
+  en: 552e1141b812e88a
+  zh: 7ad201c4af7f6b2a
+/deepseek-ai-dsh-client-conversation-annotations/model-experience/submitted-annotation-context/what-the-model-sees:
+  en: d2518140f73c3982
+  zh: 164101434ab41645
+/deepseek-ai-dsh-client-conversation-annotations/model-experience/submitted-annotation-context/token-effect:
+  en: fde322b019a946e8
+  zh: 80614a1b14ad7c4d
+/deepseek-ai-dsh-client-conversation-annotations/model-experience/submitted-annotation-context/kv-cache-effect:
+  en: a85687844cf1cb76
+  zh: ba8f21b7390976e5
+/deepseek-ai-dsh-client-conversation-annotations/known-limitations-and-deferred-work:
+  en: 84f895aec06a7b45
+  zh: 787df83ae102cb55

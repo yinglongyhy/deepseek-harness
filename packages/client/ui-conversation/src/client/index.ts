@@ -102,6 +102,10 @@ export type {
   SessionInputResolver, SubmitAttachment, SubmitOutcome,
 } from './contract/input.ts'
 export type { ArbitrateKey, ArbitrateOutcome, DraftInput, DraftReference, DraftSnapshot, ReferenceInsert, TokenSpan } from './contract/draft-editor.ts'
+export type {
+  ConversationContributionId, ConversationSubmissionAttempt, ConversationSubmissionStatus, ConversationSubmissions,
+  FrozenSubmissionContribution, SubmissionContribution, SubmissionContributionState, SubmissionContributionsState,
+} from './contract/contributions.ts'
 export type { ComposerBlock, ComposerBlocks } from './contract/composer-blocks.ts'
 
 declare module '@deepseek-ai/cordis' {

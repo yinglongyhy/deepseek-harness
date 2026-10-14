@@ -1,0 +1,23 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "tsBuildInfoFile": "lib/tsconfig.host.tsbuildinfo"
+  },
+  "include": ["src/index.ts", "src/host.ts", "src/shared.ts", "src/draft.ts"],
+  "references": [
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../core/agent" },
+    { "path": "../../core/session" },
+    { "path": "../../api/session-controller/tsconfig.host.json" },
+    { "path": "../../attachment/attachment" },
+    { "path": "../connection/tsconfig.host.json" },
+    { "path": "../file-upload/tsconfig.host.json" },
+    { "path": "../../session-query/session-query" },
+    { "path": "../../storage/storage-domain" },
+    { "path": "../../util/brand" },
+    { "path": "../ui-chat/tsconfig.host.json" },
+    { "path": "../ui-conversation/tsconfig.host.json" }
+  ]
+}

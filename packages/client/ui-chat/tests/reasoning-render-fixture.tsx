@@ -44,7 +44,8 @@ export async function createReasoningRenderFixture(language = 'zh') {
     apply: (ctx) => {
       registerChatNodeRenderers(ctx,
         createSnapshotStore<PerformanceUsageMode>('detailed'),
-        derivePresentationPolicy(createSnapshotStore<TranscriptViewMode>('detailed'), createSnapshotStore<CollapseTiming>('completion')))
+        derivePresentationPolicy(createSnapshotStore<TranscriptViewMode>('detailed'), createSnapshotStore<CollapseTiming>('completion')),
+        () => () => {})
     },
   })
   await runtime.sessions.add({ id: 'reasoning-fixture' })

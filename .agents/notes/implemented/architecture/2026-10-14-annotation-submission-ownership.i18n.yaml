@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-10-14-annotation-submission-ownership.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-10-14-annotation-submission-ownership.md
+/agent-note-annotation-submission-ownership:
+  en: d01f0ea400431748
+  zh: 49bbb086aaa18043
+/agent-note-annotation-submission-ownership/problem:
+  en: 2548964d47bbf732
+  zh: 4f43e2424b3c7bac
+/agent-note-annotation-submission-ownership/decision:
+  en: 43918c2145e89f3d
+  zh: a02560cd71efa67b
+/agent-note-annotation-submission-ownership/alternatives-considered:
+  en: 61e44fbcc80e8e05
+  zh: 33f644b6c1d14f3a
+/agent-note-annotation-submission-ownership/consequences:
+  en: 595c007c906e024e
+  zh: 20866bfe4d2e27c7

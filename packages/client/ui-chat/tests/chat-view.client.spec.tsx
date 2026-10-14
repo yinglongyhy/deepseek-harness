@@ -1,9 +1,13 @@
 // @vitest-environment jsdom
 
 import type { ProcessGroupData } from '../src/client/contract/process-groups.ts'
+import type {
+  PendingUserMessageBubbleOwnerProps, PendingUserMessagePresentationOwnerProps,
+  UserMessageBubbleOwnerProps, UserMessagePresentationOwnerProps,
+} from '../src/client/contract/slots.ts'
 import type { InboxState } from '@deepseek-ai/dsh-agent/types'
 import { MessageId } from '@deepseek-ai/dsh-llm/brand'
-import type { GlobalStandardProps, PropsRenderFactories, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
+import type { FactoryComponentPropsOf, GlobalStandardProps, PropsRenderFactories, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { useEffect, useMemo } from 'react'
@@ -44,6 +48,7 @@ import { CommandNodeView, ManualCompactionNodeView } from '../src/client/chat/Co
 import {
   CompactionNodeView, ContextMessageNodeView, RetryNodeView, TurnErrorNodeView,
   TurnMaxTokensNodeView, UnknownNodeView, UserMessageNodeView,
+  PendingUserMessagePresentationView, PendingUserMessageView, UserMessagePresentationView,
 } from '../src/client/chat/MessageItem.tsx'
 import { TurnTailNodeView } from '../src/client/chat/TurnTailNodeView.tsx'
 import { TurnProcessNodeView } from '../src/client/chat/TurnProcessNodeView.tsx'
@@ -280,18 +285,20 @@ const renderCommandSlot: React.ComponentProps<typeof CommandNodeView>['renderSlo
   (_key, _owner, opts) => opts?.fallback ?? null
 const renderTurnTailSlot: React.ComponentProps<typeof TurnTailNodeView>['renderSlot'] = () => null
 
-function HarnessChatFlow({ standard, owner, hookContext, renderSlot }: {
+function HarnessChatFlow({ standard, owner, hookContext, renderSlot, renderFactorySlot }: {
   readonly standard: HarnessStandardProps
   readonly owner: ChatFlowOwnerProps
   readonly hookContext: ChatFlowHookContext
   readonly renderSlot: ChatFlowSlotProps['renderSlot']
+  readonly renderFactorySlot: ChatFlowSlotProps['renderFactorySlot']
 }) {
   const hooks = useMemo(() => ({
     useGroupAction: CHAT_FLOW_INJECT.hooks.groupAction(standard, hookContext),
     useGroupHeaderAction: CHAT_FLOW_INJECT.hooks.groupHeaderAction(standard, hookContext),
   }), [standard, hookContext])
   const { renderSlot: _rootRenderSlot, __renders: _rootRenders, ...shared } = standard
-  return <ChatFlow {...shared} {...owner} {...hooks} renderSlot={renderSlot} />
+  return <ChatFlow {...shared} {...owner} {...hooks} renderSlot={renderSlot}
+    renderFactorySlot={renderFactorySlot} />
 }
 
 function HarnessChatNode({ standard, owner, hookContext, usePerformanceUsage, toolOwners, fallback, renderAssistantSlot }: {
@@ -437,6 +444,62 @@ function makeHarness(
       hookContext={opts.hookContext} usePerformanceUsage={usePerformanceUsage}
       toolOwners={toolOwners} fallback={opts.fallback} renderAssistantSlot={renderAssistantSlot} />
   }
+  const useUserPresentationFactorySlot: FactoryComponentPropsOf<'conversation.chat.user-message-presentation'>['useFactorySlot'] = (_name, _fallback) => {
+    throw new Error('User presentation factory declares no local slots')
+  }
+  const usePendingPresentationFactorySlot: FactoryComponentPropsOf<'conversation.chat.pending-user-message-presentation'>['useFactorySlot'] = (_name, _fallback) => {
+    throw new Error('Pending presentation factory declares no local slots')
+  }
+  const usePendingBubbleFactorySlot: FactoryComponentPropsOf<'conversation.chat.pending-user-message'>['useFactorySlot'] = (_name, _fallback) => {
+    throw new Error('Pending bubble factory declares no local slots')
+  }
+  const renderFactorySlot: ChatFlowSlotProps['renderFactorySlot'] = (key, owner, options) => {
+    switch (key) {
+      case 'conversation.chat.user.content':
+        return renderUserContent(owner as UserContentInput, renderImages, props.t)
+      case 'conversation.chat.user-message-presentation': {
+        const presentationOwner = owner as UserMessagePresentationOwnerProps
+        return <UserMessagePresentationView {...factoryStandardProps()}
+          node={presentationOwner.node}
+          loadImage={presentationOwner.loadImage}
+          renderSlot={renderFlowSlot}
+          renderSlotChain={(_chain, _chainOwner, opts) => opts?.fallback ?? null}
+          renderFactorySlot={renderFactorySlot}
+          useFactorySlot={useUserPresentationFactorySlot} />
+      }
+      case 'conversation.chat.pending-user-message-presentation': {
+        const presentationOwner = owner as PendingUserMessagePresentationOwnerProps
+        return <PendingUserMessagePresentationView {...factoryStandardProps()}
+          input={presentationOwner.input}
+          loadImage={presentationOwner.loadImage}
+          renderSlot={renderFlowSlot}
+          renderSlotChain={(_chain, _chainOwner, opts) => opts?.fallback ?? null}
+          renderFactorySlot={renderFactorySlot}
+          useFactorySlot={usePendingPresentationFactorySlot} />
+      }
+      case 'conversation.chat.user-message': {
+        const bubbleOwner = owner as UserMessageBubbleOwnerProps
+        return <UserMessageNodeView
+          node={bubbleOwner.node}
+          renderFactorySlot={renderFactorySlot}
+          loadImage={bubbleOwner.loadImage}
+          {...bubbleOwner.text === undefined ? {} : { text: bubbleOwner.text }}
+          t={t} />
+      }
+      case 'conversation.chat.pending-user-message': {
+        const bubbleOwner = owner as PendingUserMessageBubbleOwnerProps
+        return <PendingUserMessageView {...factoryStandardProps()}
+          input={bubbleOwner.input}
+          loadImage={bubbleOwner.loadImage}
+          {...bubbleOwner.text === undefined ? {} : { text: bubbleOwner.text }}
+          renderFactorySlot={renderFactorySlot}
+          useFactorySlot={usePendingBubbleFactorySlot}
+          t={t} />
+      }
+      default:
+        return options?.fallback ?? null
+    }
+  }
   const renderFlowSlot: ChatFlowSlotProps['renderSlot'] = (key: string, owner: object, opts?: {
     fallback?: React.ReactNode
     hookContext?: unknown
@@ -446,16 +509,13 @@ function makeHarness(
     }
     throw new Error(`Undeclared flow child: ${key}`)
   }
-  const renderFactorySlot: PropsRenderFactories['renderFactorySlot'] = (name, owner) => {
-    if (name !== 'conversation.chat.user.content') throw new Error(`Unexpected Chat Factory: ${name}`)
-    return renderUserContent(owner as UserContentInput, renderImages, props.t)
-  }
   const renderSlot: FlowRenderer = (key, owner, opts) => {
     if (key !== 'conversation.chat.flow') throw new Error(`Undeclared ChatView child: ${key}`)
     if ('renderSlot' in owner || 'useStore' in owner || 'actions' in owner) {
       throw new Error('Flow owner data must not replace its rendering or store authority')
     }
-    return <HarnessChatFlow standard={props} owner={owner} hookContext={opts.hookContext} renderSlot={renderFlowSlot} />
+    return <HarnessChatFlow standard={props} owner={owner} hookContext={opts.hookContext}
+      renderSlot={renderFlowSlot} renderFactorySlot={renderFactorySlot} />
   }
   // SessionProvider seat arrives with the session-scope child declaration;
   // ChatView never invokes it (pass-through stub).
@@ -497,6 +557,7 @@ function makeHarness(
     },
     useStore: bindSnapshotSelector(chat),
     actions: chat.actions,
+    registerTextView: () => () => {},
     usePresentation: bindSnapshotSelector(derivePresentationPolicy(transcriptView, collapseTiming)),
     // The fixture implements the concrete flow dispatch behind the generic slot signature.
     renderSlot: renderSlot as ChatViewSlotProps['renderSlot'],
@@ -515,6 +576,10 @@ function makeHarness(
     // Absent-service default; mention tests override with a real resolver.
     fileMentions: () => undefined,
     t,
+  }
+  function factoryStandardProps() {
+    const { renderSlot: _renderSlot, __renders: _renders, ...standardProps } = props
+    return standardProps
   }
   const set = (next: HarnessUpdate): void => {
     const {

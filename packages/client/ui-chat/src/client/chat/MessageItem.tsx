@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
+import type { FactoryComponentPropsOf, PropsRenderFactories } from '@deepseek-ai/dsh-client-ui-slots'
 import type { PendingSubmission } from '@deepseek-ai/dsh-api-session-controller/client'
-import type { PropsRenderFactories } from '@deepseek-ai/dsh-client-ui-slots'
 import type { UserTextFacts } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { JsonBlock, StateDot, TextShimmer } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
@@ -163,9 +163,11 @@ function TurnMaxTokensItem({ t }: {
 /** Right-aligned bubble shared by user and steering rows. */
 function UserStyleBubble({
   content, loadImage, renderFactorySlot, actions, pending = false, echo = false, referenceLabels, skillNames,
-  previewAttachments, facts: inputFacts = EMPTY_TEXT_FACTS, interactive = false,
+  previewAttachments, facts: inputFacts = EMPTY_TEXT_FACTS, interactive = false, text: projectedText,
 }: {
   content: readonly unknown[]
+  /** Display-only text; attachments and transform facts retain their native owners. */
+  text?: string
   renderFactorySlot: PropsRenderFactories['renderFactorySlot']
   /** Optional IconActions (or similar) below the bubble; receives the joined text. */
   actions?: (text: string) => ReactNode
@@ -184,11 +186,11 @@ function UserStyleBubble({
 } & Pick<ChatNodeOwnerProps, 'loadImage'> & Pick<UserContentInput, 'interactive'>): ReactNode {
   const parts = useMemo(() => contentParts(content), [content])
   const prepared = useMemo<UserContentData>(() => ({
-    text: parts.text,
+    text: projectedText ?? parts.text,
     attachments: previewAttachments ?? parts.attachments,
     extraBlocks: parts.rest,
     ...(referenceLabels === undefined ? {} : { referenceLabels }),
-  }), [parts, previewAttachments, referenceLabels])
+  }), [parts, projectedText, previewAttachments, referenceLabels])
   const facts = useMemo<Readonly<Partial<UserTextFacts>>>(() => ({
     ...inputFacts,
     ...(referenceLabels === undefined ? {} : { sessionLabels: referenceLabels }),
@@ -217,7 +219,8 @@ function UserStyleBubble({
  * @param props - pending content, authorized image loader, and Factory/locale seats.
  * @returns the pending steering bubble.
  */
-export function PendingSteeringBubble({ content, loadImage, renderFactorySlot, t }: {
+export function PendingSteeringBubble({ content, loadImage, renderFactorySlot, text, t }: {
+  text?: string
   content: readonly unknown[]
   renderFactorySlot: PropsRenderFactories['renderFactorySlot']
   t: ChatViewSlotProps['t']
@@ -225,6 +228,7 @@ export function PendingSteeringBubble({ content, loadImage, renderFactorySlot, t
   return (
     <UserStyleBubble
       content={content}
+      {...text === undefined ? {} : { text }}
       renderFactorySlot={renderFactorySlot}
       loadImage={loadImage}
       pending
@@ -248,8 +252,9 @@ export function PendingSteeringBubble({ content, loadImage, renderFactorySlot, t
  * @param props - the pending submission, authorized image loader, and render seats.
  * @returns the echoed user bubble.
  */
-export function PendingSubmissionBubble({ submission, loadImage, renderFactorySlot, t }: {
+export function PendingSubmissionBubble({ submission, loadImage, renderFactorySlot, text, t }: {
   submission: PendingSubmission
+  text?: string
   renderFactorySlot: PropsRenderFactories['renderFactorySlot']
   t: ChatViewSlotProps['t']
 } & Pick<ChatNodeOwnerProps, 'loadImage'>): ReactNode {
@@ -277,6 +282,7 @@ export function PendingSubmissionBubble({ submission, loadImage, renderFactorySl
     <UserStyleBubble
       content={content}
       previewAttachments={previewAttachments}
+      {...text === undefined ? {} : { text }}
       renderFactorySlot={renderFactorySlot}
       loadImage={loadImage}
       pending={submission.placement === 'steering'}
@@ -294,14 +300,60 @@ export function PendingSubmissionBubble({ submission, loadImage, renderFactorySl
   )
 }
 
-/** User and admitted-steering keyed Chat renderer. */
+/**
+ * Dispatch pending presentation while preserving the native fallback.
+ * @param props - Original pending input and framework rendering seats.
+ * @returns First claimed presentation or native pending bubble.
+ */
+export function PendingUserMessagePresentationView({ input, loadImage, renderSlotChain, renderFactorySlot }: FactoryComponentPropsOf<'conversation.chat.pending-user-message-presentation'>): ReactNode {
+  const owner = { input, loadImage }
+  return renderSlotChain('conversation.chat.pending-user-presentation', owner, {
+    fallback: renderFactorySlot('conversation.chat.pending-user-message', owner),
+  })
+}
+
+/**
+ * Render original pending attachments and placement with optional projected text.
+ * @param props - Native input, optional display text, and localized rendering seats.
+ * @returns Local echo or Host pending steering bubble.
+ */
+export function PendingUserMessageView({ input, loadImage, renderFactorySlot, text, t }: FactoryComponentPropsOf<'conversation.chat.pending-user-message'>) {
+  const shared = { loadImage, renderFactorySlot, t, ...text === undefined ? {} : { text } }
+  return 'requestId' in input
+    ? <PendingSubmissionBubble submission={input} {...shared} />
+    : <PendingSteeringBubble content={input.content} {...shared} />
+}
+
+/**
+ * Share one presentation chain between opening and admitted steering entries.
+ * @param props - Original node and framework factory seat.
+ * @returns Durable user presentation assembly.
+ */
+export function UserMessageNodeSlotView({ node, loadImage, renderFactorySlot }: ChatNodeViewProps<'user' | 'steering'> & PropsRenderFactories) {
+  return renderFactorySlot('conversation.chat.user-message-presentation', { node, loadImage })
+}
+
+/**
+ * Dispatch durable presentation while preserving the native fallback.
+ * @param props - Original node and framework rendering seats.
+ * @returns First claimed presentation or native durable bubble.
+ */
+export function UserMessagePresentationView({ node, loadImage, renderSlotChain, renderFactorySlot }: FactoryComponentPropsOf<'conversation.chat.user-message-presentation'>) {
+  const owner = { node, loadImage }
+  return renderSlotChain('conversation.chat.user-presentation', owner, {
+    fallback: renderFactorySlot('conversation.chat.user-message', owner),
+  })
+}
+
+/** Native durable user bubble; projections never alter persisted text or attachment ownership. */
 export const UserMessageNodeView = memo(function UserMessageNodeView({
-  node, renderFactorySlot, loadImage, t,
-}: ChatNodeViewProps<'user' | 'steering'>) {
+  node, renderFactorySlot, loadImage, text, t,
+}: Pick<FactoryComponentPropsOf<'conversation.chat.user-message'>, 'node' | 'renderFactorySlot' | 'loadImage' | 'text' | 't'>) {
   const data = node.data
   return (
     <UserStyleBubble
       content={data.content}
+      {...text === undefined ? {} : { text }}
       interactive
       renderFactorySlot={renderFactorySlot}
       loadImage={loadImage}

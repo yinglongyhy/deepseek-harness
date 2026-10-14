@@ -1,0 +1,72 @@
+.summary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  width: min(408px, 100%);
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-xs-13);
+}
+
+/* Match the composer accessory's 12px side inset; its card supplies 8px above. */
+.composerSummary { margin: 4px 12px 0; width: min(408px, calc(100% - 24px)); }
+.historySummary { margin-inline-start: auto; align-items: flex-end; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.badgeGroup { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; padding: 2px 4px 2px 2px; background: var(--dsw-alias-interactive-bg-hover); border: 0.5px solid var(--dsw-alias-border-l2); border-radius: 999px; corner-shape: round; }
+.badge { max-width: 100%; border-radius: 999px; corner-shape: round; }
+.clearAction { border-radius: 50%; corner-shape: round; }
+.iconAction { flex: none; width: 28px; padding: 0; color: var(--dsw-alias-label-secondary); }
+.list { padding: 0; margin: 0; list-style: none; }
+.preview { min-height: 0; overflow: auto; padding: 4px 16px; font: var(--dsw-font-xs-13); --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2); --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2); }
+.previewWidthAnchor, .sourceEditor, .detailsPanel { --annotations-panel-width: min(408px, calc(100vw - 24px)); }
+.previewAnchor { display: inline-flex; }
+/* HoverCard removes its 24px side insets. Fixed measurement avoids bubble/scroll overflow. */
+.previewWidthAnchor { position: fixed; width: calc(var(--annotations-panel-width) + 48px); height: 0; visibility: hidden; pointer-events: none; }
+.item { position: relative; min-width: 0; padding: 16px 0; }
+.rowActions { position: absolute; top: 16px; right: 0; display: flex; align-items: center; gap: 4px; }
+.item + .item { border-top: 0.5px solid var(--dsw-alias-border-l2); }
+.label { display: flex; flex-direction: column; gap: 6px; color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xxs-12); }
+.sourceEditor, .detailsPanel { position: fixed; z-index: 100; pointer-events: auto; box-sizing: border-box; width: var(--annotations-panel-width); max-height: calc(100dvh - 96px); overflow: auto; padding: 16px; border: 0; box-shadow: var(--dsw-elevation-panel); color: var(--dsw-alias-label-primary); font: var(--dsw-font-xs-13); --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2); --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2); }
+.sourceEditor { display: flex; flex-direction: column; gap: 12px; }
+.record { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: start; gap: 12px; width: 100%; padding: 0; border: 0; border-radius: var(--dsw-radius-sm); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.recordNumber { display: flex; align-items: center; height: 28px; color: var(--dsw-alias-label-secondary); }
+.recordContent { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.recordField { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.recordField:first-child > .label { box-sizing: border-box; min-height: 28px; padding-right: 64px; justify-content: center; }
+.recordQuote, .recordComment { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.record:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.record:focus-visible { outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color); outline-offset: 3px; }
+.detail { min-width: 0; color: var(--dsw-alias-label-primary); font: var(--dsw-font-s-14); }
+.detail .item:first-child { padding-top: 0; }
+.detail .item:first-child .rowActions { top: 0; }
+.detail .item:last-child { padding-bottom: 0; }
+.editor {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  /* Native content sizing grows and shrinks on typing, wrapping and width changes. */
+  min-height: calc(1lh + 25px);
+  max-height: min(240px, calc(100dvh - 180px));
+  field-sizing: content;
+  flex: none;
+  overflow-y: auto;
+  resize: none;
+  padding: 12px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-lg);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-s-14);
+}
+.editor::placeholder { color: var(--dsw-alias-label-dimmed); }
+.editor:focus { border-color: var(--dsw-alias-state-business-primary); outline: none; }
+.editor:focus-visible { outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); outline-offset: 2px; }
+.editActions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.editActions > :first-child { margin-inline-end: auto; }
+.status, .error { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: var(--dsw-font-xs-13); }
+.status { color: var(--dsw-alias-label-secondary); }
+.error { color: var(--dsw-alias-state-error-primary); }
+.selectionAnchor { position: fixed; visibility: hidden; pointer-events: none; left: var(--annotations-anchor-x); top: var(--annotations-anchor-y); width: var(--annotations-anchor-width); height: var(--annotations-anchor-height); }
+.selection { position: fixed; z-index: 100; pointer-events: auto; box-sizing: border-box; left: var(--annotations-left); top: var(--annotations-top); max-width: calc(100vw - 16px); padding: 4px; border: 0; box-shadow: var(--dsw-elevation-panel); color: var(--dsw-alias-label-primary); font: var(--dsw-font-xs-13); }
+.selection > button { height: auto; min-height: 28px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }

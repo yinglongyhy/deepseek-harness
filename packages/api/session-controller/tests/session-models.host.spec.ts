@@ -94,6 +94,7 @@ async function harness(logged?: {
   sessionId: SessionId
 }> {
   await ctx.plugin(SessionStore)
+  ctx.on('session/flush', async () => {})
   await ctx.plugin(SystemPrompt, { personaPrefix: '' })
   await ctx.plugin(LlmRuntime)
   await ctx.plugin(AgentRegistry)

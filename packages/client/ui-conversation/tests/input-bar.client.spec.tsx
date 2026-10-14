@@ -26,6 +26,7 @@ import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { SubmitOutcome } from '../src/client/contract/input.ts'
+import type { SubmissionContributionsState } from '../src/client/contract/contributions.ts'
 import { SessionInputShell } from '../src/client/input/facade.ts'
 import { $replaceDetectSpanWithText, $selectDetectSpan } from '../src/client/input/editor/span-map.ts'
 import type {
@@ -95,6 +96,8 @@ interface BenchOptions {
   variant?: 'hero' | 'composer'
   placeholder?: string
   t?: InputBarProps['t']
+  contributions?: SubmissionContributionsState
+  summary?: React.ReactNode
   accessory?: React.ReactNode
   overlay?: React.ReactNode
   leftItems?: React.ReactNode
@@ -135,8 +138,10 @@ function bench(over?: BenchOptions) {
     promptError: over?.promptError ?? null,
   }))
   type ShellDeps = ConstructorParameters<typeof SessionInputShell>[0]
+  const contributions = createSnapshotStore<SubmissionContributionsState>(over?.contributions ?? { hasContent: false })
   const shell = new SessionInputShell({
     actx: SCTX,
+    contributions,
     defaultSink: sink,
     commandAttachments: { serialize: () => Promise.resolve([]), release: () => {}, unsupportedNotice: (token: string) => `${token.trim()} attachments-unsupported` },
     inbox: createSnapshotStore<InboxState>({
@@ -165,6 +170,7 @@ function bench(over?: BenchOptions) {
   const slotCalls: { key: string; owner: unknown }[] = []
   const renderSlot = ((key: string, owner: object) => {
     slotCalls.push({ key, owner })
+    if (key === 'conversation.input.summary') return over?.summary ?? null
     if (key === 'conversation.input.overlay') return over?.overlay ?? null
     if (key === 'conversation.input.left') return over?.leftItems ?? null
     if (key === 'conversation.input.right') return over?.rightItems ?? null
@@ -203,6 +209,7 @@ function bench(over?: BenchOptions) {
     keyboard: shell,
     addFiles: over?.addFiles ?? (() => null),
     useFileUploads: bindSnapshotSelector(createSnapshotStore<DraftFileUploads>(over?.fileUploads ?? {})),
+    useContributions: bindSnapshotSelector(contributions),
     retryFileUpload: undefined,
     removeAttachment,
     resolveDraftAttachments: ids => ids.flatMap((id) => {
@@ -229,7 +236,7 @@ function bench(over?: BenchOptions) {
   }
   const view = render(<InputBar {...props} />)
   const textarea = view.container.querySelector<HTMLDivElement>('[data-composer-input]')!
-  const sendableDraft = (over?.draft?.trim() ?? '') !== '' || (over?.attachments?.length ?? 0) > 0
+  const sendableDraft = (over?.draft?.trim() ?? '') !== '' || (over?.attachments?.length ?? 0) > 0 || over?.contributions?.hasContent === true
   const primaryStops = over?.running === true && over.subagent === undefined
     && (!sendableDraft || over.blocked !== undefined)
   // A running steer-capable composer (ordinary session or continuable child
@@ -254,7 +261,7 @@ function bench(over?: BenchOptions) {
   const interruptButton = view.container.querySelector<HTMLButtonElement>('button[aria-label="停止生成"]')
   return {
     view, textarea, button, interruptButton, props, sink, shell, wiring: shell, session, stop, removeAttachment, slotCalls,
-    menuLauncher, busyEnter, stopShortcut,
+    menuLauncher, busyEnter, stopShortcut, contributions,
     steerQueue: over?.steerQueue,
     get placeholder() { return placeholderOf(view.container) },
     get inputDisabled() { return textarea.getAttribute('aria-disabled') === 'true' },
@@ -1800,6 +1807,138 @@ describe('strips and variants', () => {
   })
 })
 
+describe('submission contributions in the resident composer', () => {
+  it('renders the additive summary inside the composer card before the editor', () => {
+    const b = bench({ summary: <div data-testid="summary">Draft summary</div> })
+    const summary = b.view.getByTestId('summary')
+    expect(b.view.container.querySelector('[data-composer-card]')?.contains(summary)).toBe(true)
+    expect(summary.compareDocumentPosition(b.textarea) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+  })
+
+  it.each(['click', 'enter', 'ctrl', 'meta'] as const)('sends contribution-only content with %s using the ordinary submission mode', async (gesture) => {
+    const accelerated = gesture === 'ctrl' || gesture === 'meta'
+    const b = bench({ contributions: { hasContent: true }, running: accelerated })
+    expect(b.button.disabled).toBe(false)
+    if (gesture === 'click') fireEvent.click(b.button)
+    else fireEvent.keyDown(b.textarea, { key: 'Enter', ctrlKey: gesture === 'ctrl', metaKey: gesture === 'meta' })
+    await act(async () => {})
+    expect(b.sink).toHaveBeenCalledExactlyOnceWith('', [], accelerated ? 'steer' : 'queue', expect.any(AbortSignal))
+  })
+
+  it('blocks click and Enter reactively without preventing edits to the next draft', async () => {
+    const b = bench({ contributions: { hasContent: true, blockReason: 'Saving' } })
+    expect(b.button.disabled).toBe(true)
+    expect(b.inputDisabled).toBe(false)
+    fireEvent.click(b.button)
+    fireEvent.keyDown(b.textarea, { key: 'Enter' })
+    fireEvent.keyDown(b.textarea, { key: 'Enter', ctrlKey: true })
+    act(() => { b.shell.setDraft('new draft') })
+    await act(async () => {})
+    expect(b.sink).not.toHaveBeenCalled()
+    expect(b.shell.snapshot.draft).toBe('new draft')
+    act(() => { b.contributions.set({ hasContent: true }) })
+    expect(b.button.disabled).toBe(false)
+    fireEvent.click(b.button)
+    await act(async () => {})
+    expect(b.sink).toHaveBeenCalledOnce()
+  })
+
+  it('keeps a pending current revision unsendable and unlocks when the contribution publishes a new revision', async () => {
+    const b = bench({ contributions: { hasContent: true, pending: true } })
+    expect(b.button.disabled).toBe(true)
+    expect(b.inputDisabled).toBe(false)
+    fireEvent.keyDown(b.textarea, { key: 'Enter' })
+    fireEvent.keyDown(b.textarea, { key: 'Enter', metaKey: true })
+    expect(b.sink).not.toHaveBeenCalled()
+    act(() => { b.contributions.set({ hasContent: true }) })
+    fireEvent.click(b.button)
+    await act(async () => {})
+    expect(b.sink).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    { hasContent: true, pending: true },
+    { hasContent: true, blockReason: 'Saving' },
+  ] satisfies SubmissionContributionsState[])('keeps paste, edits and Shift+Enter available under contribution lock %j', async (state) => {
+    const b = bench({ draft: 'old draft', contributions: { hasContent: true } })
+    act(() => { b.contributions.set(state) })
+    expect(b.button.disabled).toBe(true)
+    expect(editableOf(b.textarea)).toBe(true)
+
+    act(() => {
+      b.shell.editor.update(() => { $selectDetectSpan({ start: 0, end: 9 }) }, { discrete: true })
+    })
+    fireEvent.paste(b.textarea, {
+      clipboardData: { items: [], getData: () => 'newer draft' },
+    })
+    await act(async () => {})
+    expect(b.shell.snapshot.draft).toBe('newer draft')
+    expect(b.textarea.textContent).toBe('newer draft')
+
+    act(() => {
+      b.shell.editor.update(() => {
+        const first = $getRoot().getAllTextNodes()[0]
+        if ($isTextNode(first)) first.selectEnd().insertText(' edited')
+      }, { discrete: true })
+    })
+    expect(b.shell.snapshot.draft).toBe('newer draft edited')
+    expect(b.textarea.textContent).toBe('newer draft edited')
+    fireEvent.keyDown(b.textarea, { key: 'Enter', shiftKey: true })
+    await act(async () => {})
+    expect(b.shell.snapshot.draft).toBe('newer draft edited\n')
+    expect(b.textarea.querySelector('br')).not.toBeNull()
+
+    for (const modifiers of [{}, { ctrlKey: true }, { metaKey: true }]) {
+      fireEvent.keyDown(b.textarea, { key: 'Enter', ...modifiers })
+    }
+    fireEvent.click(b.button)
+    await act(async () => {})
+    expect(b.sink).not.toHaveBeenCalled()
+    expect(b.shell.snapshot.draft).toBe('newer draft edited\n')
+
+    act(() => { b.contributions.set({ hasContent: true }) })
+    expect(b.button.disabled).toBe(false)
+    fireEvent.keyDown(b.textarea, { key: 'Enter' })
+    await act(async () => {})
+    expect(b.sink).toHaveBeenCalledExactlyOnceWith('newer draft edited', [], 'queue', expect.any(AbortSignal))
+  })
+
+  it.each([
+    { disabled: true },
+    { inert: true },
+    { blocked: { reason: 'Unavailable' } },
+    {
+      subagent: {
+        address: { parentSessionId: 'parent' as SessionId, childSessionId: SID, mode: 'continuable' },
+        parentAvailable: false,
+      },
+    },
+  ] satisfies BenchOptions[])('keeps genuine read-only state locked during contribution readiness %j', async (options) => {
+    const b = bench({ ...options, draft: 'retained draft', contributions: { hasContent: true, pending: true } })
+    expect(editableOf(b.textarea)).toBe(false)
+    fireEvent.paste(b.textarea, { clipboardData: { items: [], getData: () => 'replacement' } })
+    fireEvent.keyDown(b.textarea, { key: 'Enter', shiftKey: true })
+    fireEvent.keyDown(b.textarea, { key: 'Enter', ctrlKey: true })
+    fireEvent.click(b.button)
+    await act(async () => {})
+    expect(b.shell.snapshot.draft).toBe('retained draft')
+    expect(b.textarea.textContent).toBe('retained draft')
+    expect(b.sink).not.toHaveBeenCalled()
+  })
+
+  it('does not restore an uncertain submitted editor snapshot over a newer draft', async () => {
+    const b = bench({ draft: 'old draft', contributions: { hasContent: true } })
+    const outcome = Promise.withResolvers<SubmitOutcome>()
+    b.sink.mockImplementationOnce(() => outcome.promise)
+    fireEvent.click(b.button)
+    expect(b.shell.snapshot.draft).toBe('')
+    act(() => { b.shell.setDraft('new draft') })
+    await act(async () => { outcome.resolve({ kind: 'error', admission: 'uncertain' }); await outcome.promise })
+    expect(b.shell.snapshot.draft).toBe('new draft')
+    expect(b.sink).toHaveBeenCalledOnce()
+  })
+})
+
 describe('command launcher chrome and control seats', () => {
   it('renders the command launcher and dispatches every empty control seat', () => {
     const { view, slotCalls } = bench()
@@ -1809,7 +1948,7 @@ describe('command launcher chrome and control seats', () => {
     // Every seat dispatched, nothing rendered (render passes may repeat; the
     // seat set is the contract).
     expect([...new Set(slotCalls.map(c => c.key))]).toEqual([
-      'conversation.input.overlay', 'conversation.input.attachments',
+      'conversation.input.overlay', 'conversation.input.summary', 'conversation.input.attachments',
       'conversation.input.permission', 'conversation.input.plan', 'conversation.input.left',
       'conversation.input.right', 'conversation.input.model', 'conversation.input.activity',
       'conversation.composer.dock',

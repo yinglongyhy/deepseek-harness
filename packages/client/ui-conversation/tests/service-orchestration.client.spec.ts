@@ -6,14 +6,20 @@
 import type { UserMessage } from '@deepseek-ai/dsh-llm/types'
 import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
 import { Context } from '@deepseek-ai/cordis'
+import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import { describe, expect, it, vi } from 'vitest'
 import { makeTranslate, RemoteError, SlotTestRuntime } from '@deepseek-ai/dsh-client-test-runtime'
 import type {
   BeginSubmissionInput, PendingSubmissionRetirement,
 } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { SessionRequestId } from '@deepseek-ai/dsh-api-session-controller/types'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
+import type { ConversationContributionId, ConversationSubmissionAttempt, SubmissionContributionState } from '../src/client/contract/contributions.ts'
+import type { CommandClaim, DraftAttachmentId, InputTriggerController, PickOutcome } from '../src/client/contract/input.ts'
 import { ComposerBlockRegistry } from '../src/client/input/blocks.ts'
 import { InputHub } from '../src/client/input/hub.ts'
+import { $composerLayout } from '../src/client/input/editor/projection.ts'
 import { ConversationController } from '../src/client/service.ts'
 import { zh } from '../src/client/locales.ts'
 
@@ -53,7 +59,291 @@ async function bench(maxConcurrentFileUploads = 2) {
   return { runtime, fiber, root, scoped, hub, shell, prompt, updateQueue, cancel, loadOlder, reference }
 }
 
+function codecs(b: Awaited<ReturnType<typeof bench>>, serializeReference: InputTriggerController['serializeReference'], adjudicate: InputTriggerController['adjudicate'] = async () => undefined) {
+  const controller: InputTriggerController = {
+    launcher: createSnapshotStore<string | null>(null),
+    lexicon: createSnapshotStore<ReadonlyMap<'/' | '@', readonly string[]>>(new Map()),
+    track: () => {}, arbitrate: () => 'pass', onSpace: () => false,
+    serializeReference, adjudicate, resolveClaim: async () => undefined, openReference: () => false, toggleSource: () => {},
+  }
+  b.runtime.ctx.provide('inputTriggers', { sessionOf: () => controller })
+}
+
+function insertChip(b: Awaited<ReturnType<typeof bench>>) {
+  b.shell.setDraft('@ref')
+  expect(b.shell.insertReference({ source: 'reference', ref: '@ref', label: 'Reference', clipboardText: '@ref' }, {
+    start: 0, end: 4, draftRev: b.shell.snapshot.draftRev,
+  })).toBe(true)
+}
+
+function note(b: Awaited<ReturnType<typeof bench>>) {
+  const state = createSnapshotStore<SubmissionContributionState>({ hasContent: true, revision: 1, text: 'note' })
+  const prepare = vi.fn(async () => {})
+  const settled = Promise.withResolvers<ConversationSubmissionAttempt>()
+  const off = b.scoped.registerContribution('s1' as SessionId, {
+    id: 'note' as ConversationContributionId, state, prepare,
+    settle: (attempt) => { settled.resolve(attempt) },
+  })
+  return { state, prepare, settled, off }
+}
+
 describe('ConversationController', () => {
+  it('retries restored identity with copied replacement file receipts without changing logical content', async () => {
+    const b = await bench()
+    try {
+      const attempt = b.root.submissions.restore({
+        sessionId: 's1' as SessionId, requestId: 'restored-retry' as SessionRequestId,
+        source: 'enter', mode: 'steer', text: 'original text', contributions: [],
+        attachments: [{ type: 'image', mediaType: 'image/png', data: 'AQ==', name: 'original.png' }, { type: 'file', receiptId: 'expired-receipt' }],
+      })
+      const fresh = { type: 'file' as const, receiptId: 'fresh-receipt' }
+      const transport = [attempt.attachments[0]!, fresh]
+      const sending = b.root.retrySubmission(attempt, undefined, transport)
+      fresh.receiptId = 'mutated-after-retry'
+      expect(await sending).toEqual({ kind: 'success', admission: 'accepted' })
+      expect(b.prompt).toHaveBeenCalledWith([
+        attempt.attachments[0], { type: 'file', receiptId: 'fresh-receipt' }, { type: 'text', text: 'original text' },
+      ], 'steer', expect.any(AbortSignal), attempt.requestId)
+      expect(attempt.attachments[1]).toEqual({ type: 'file', receiptId: 'expired-receipt' })
+      await expect(b.root.retrySubmission(attempt, undefined, [fresh])).rejects.toThrow('retry may replace only file receipts in their original positions')
+      await expect(b.root.retrySubmission(attempt, undefined, [fresh, attempt.attachments[0]!])).rejects.toThrow('retry may replace only file receipts in their original positions')
+      await expect(b.root.retrySubmission(attempt, undefined, [{ type: 'image', mediaType: 'image/png', data: 'Ag==', name: 'original.png' }, fresh])).rejects.toThrow('retry may replace only file receipts in their original positions')
+      expect(b.prompt).toHaveBeenCalledOnce()
+    } finally { await b.runtime.dispose() }
+  })
+  it('reserves a real reference send before codecs so click, Enter, and programmatic sends cannot duplicate its revision', async () => {
+    const b = await bench()
+    const gate = Promise.withResolvers<string>()
+    try {
+      const n = note(b)
+      const serializer = vi.fn(() => gate.promise)
+      codecs(b, serializer)
+      insertChip(b)
+      b.shell.submit('queue', 'click')
+      b.shell.setDraft('next draft')
+      b.shell.submit('queue', 'enter')
+      const duplicate = b.root.sendSession(b.runtime.sessions.binding('s1')!.session, 'programmatic', [], 'queue')
+      await expect(duplicate).rejects.toThrow('admission pending')
+      expect(b.root.submissions.storeFor('s1' as SessionId).getSnapshot().pending).toBe(true)
+      expect(b.shell.snapshot.draft).toBe('next draft')
+      expect(b.prompt).not.toHaveBeenCalled()
+      gate.resolve('expanded reference')
+      const attempt = await n.settled.promise
+      await b.runtime.flush()
+      expect(serializer).toHaveBeenCalledOnce()
+      expect(b.prompt).toHaveBeenCalledOnce()
+      expect(b.prompt).toHaveBeenCalledWith([{ type: 'text', text: 'expanded reference\n\nnote' }], 'queue', expect.any(AbortSignal), attempt.requestId)
+    } finally { gate.resolve('expanded reference'); await b.runtime.dispose() }
+  })
+
+  it('unlocks the captured revision after a real reference codec rejection', async () => {
+    const b = await bench()
+    const gate = Promise.withResolvers<string>()
+    try {
+      const n = note(b)
+      codecs(b, () => gate.promise)
+      insertChip(b)
+      b.shell.submit('queue', 'enter')
+      expect(b.root.submissions.storeFor('s1' as SessionId).getSnapshot().pending).toBe(true)
+      gate.reject(new Error('codec failed'))
+      await b.runtime.flush()
+      expect(b.root.submissions.storeFor('s1' as SessionId).getSnapshot().pending).not.toBe(true)
+      expect(b.prompt).not.toHaveBeenCalled()
+      expect((await b.root.sendSession(b.runtime.sessions.binding('s1')!.session, 'retry', [], 'queue')).admission).toBe('accepted')
+      expect(n.prepare).toHaveBeenCalledOnce()
+    } finally { gate.resolve('unused'); await b.runtime.dispose() }
+  })
+
+  it.each(['owner', 'shell'] as const)('prevents late reference admission after %s teardown and drains codec work', async (target) => {
+    const b = await bench()
+    const gate = Promise.withResolvers<string>()
+    try {
+      const n = note(b)
+      const entered = Promise.withResolvers<AbortSignal>()
+      codecs(b, (_source, _ref, signal) => { entered.resolve(signal); return gate.promise })
+      insertChip(b)
+      b.shell.submit('queue', 'click')
+      expect(b.root.submissions.storeFor('s1' as SessionId).getSnapshot().pending).toBe(true)
+      const signal = await entered.promise
+      let drained = false
+      const disposal = target === 'owner' ? n.off().then(() => { drained = true }) : Promise.resolve(b.shell.dispose())
+      if (target === 'owner') { await Promise.resolve(); expect(drained).toBe(false) }
+      expect(signal.aborted).toBe(true)
+      gate.resolve('late reference')
+      if (target === 'owner') await expect(disposal).rejects.toThrow('submission cancelled before admission')
+      else await disposal
+      await b.runtime.flush()
+      expect(b.prompt).not.toHaveBeenCalled()
+      expect(n.prepare).not.toHaveBeenCalled()
+      expect(b.root.submissions.storeFor('s1' as SessionId).getSnapshot().pending).not.toBe(true)
+    } finally { gate.resolve('unused'); await b.runtime.dispose() }
+  })
+
+  it.each(['handled', 'claimed', 'failed'] as const)('releases a slash capture after %s adjudication', async (result) => {
+    const b = await bench()
+    const gate = Promise.withResolvers<PickOutcome>()
+    try {
+      note(b)
+      codecs(b, async () => '', () => gate.promise)
+      b.shell.setDraft('/command')
+      b.shell.submit('queue', 'enter')
+      expect(b.root.submissions.storeFor('s1' as SessionId).getSnapshot().pending).toBe(true)
+      if (result === 'failed') gate.reject(new Error('adjudication failed'))
+      else gate.resolve(result === 'handled' ? 'handled' : { claim: { name: 'command', token: '/command ', submit: async () => ({ kind: 'success' }) } })
+      await b.runtime.flush()
+      expect(b.root.submissions.storeFor('s1' as SessionId).getSnapshot().pending).not.toBe(true)
+      expect(b.prompt).not.toHaveBeenCalled()
+      expect((await b.root.sendSession(b.runtime.sessions.binding('s1')!.session, 'ordinary', [], 'queue')).admission).toBe('accepted')
+    } finally { gate.resolve(undefined); await b.runtime.dispose() }
+  })
+
+  it.each(['success', 'failure'] as const)('keeps contributions intact across a claimed command %s, then freezes the next ordinary send', async (result) => {
+    const b = await bench()
+    const commandGate = Promise.withResolvers<{ kind: 'success' | 'error' }>()
+    const codecGate = Promise.withResolvers<string>()
+    try {
+      const n = note(b)
+      codecs(b, () => codecGate.promise)
+      const claim: CommandClaim = { name: 'tool', token: '/tool ', submit: () => commandGate.promise }
+      b.shell.setDraft('/tool')
+      expect(b.shell.beginCommand(claim, { start: 0, end: 5, draftRev: b.shell.snapshot.draftRev })).toBe(true)
+      b.shell.submit('queue', 'enter')
+      await vi.waitFor(() => { expect(b.shell.snapshot.phase).toBe('submitting') })
+      expect(n.state.getSnapshot()).toMatchObject({ hasContent: true, revision: 1, text: 'note' })
+      expect(n.prepare).not.toHaveBeenCalled()
+      commandGate.resolve({ kind: result === 'success' ? 'success' : 'error' })
+      await vi.waitFor(() => { expect(b.shell.snapshot.phase).toBe(result === 'success' ? 'plain' : 'claimed') })
+      expect(n.state.getSnapshot()).toMatchObject({ hasContent: true, revision: 1, text: 'note' })
+      expect(n.prepare).not.toHaveBeenCalled()
+
+      b.shell.setDraft('ordinary @ref')
+      expect(b.shell.insertReference({ source: 'reference', ref: '@ref', label: 'Reference', clipboardText: '@ref' }, {
+        start: 9, end: 13, draftRev: b.shell.snapshot.draftRev,
+      })).toBe(true)
+      b.shell.submit('queue', 'enter')
+      n.state.set({ hasContent: true, revision: 2, text: 'new note' })
+      b.shell.setDraft('new draft')
+      codecGate.resolve('expanded reference')
+      const attempt = await n.settled.promise
+      await b.runtime.flush()
+      expect(attempt.text).toBe('ordinary expanded reference\n\nnote')
+      expect(attempt.contributions).toMatchObject([{ revision: 1, text: 'note' }])
+      expect(n.state.getSnapshot()).toMatchObject({ hasContent: true, revision: 2, text: 'new note' })
+      expect(b.shell.snapshot.draft).toBe('new draft')
+      expect(b.prompt).toHaveBeenCalledWith([{ type: 'text', text: attempt.text }], 'queue', expect.any(AbortSignal), attempt.requestId)
+    } finally {
+      commandGate.resolve({ kind: 'error' })
+      codecGate.resolve('unused')
+      await b.runtime.dispose()
+    }
+  })
+
+  it('allows a newer owner revision while an earlier reference codec is pending', async () => {
+    const b = await bench()
+    const gate = Promise.withResolvers<string>()
+    try {
+      const n = note(b)
+      codecs(b, () => gate.promise)
+      insertChip(b)
+      b.shell.submit('queue', 'click')
+      expect(b.root.submissions.storeFor('s1' as SessionId).getSnapshot().pending).toBe(true)
+      n.state.set({ hasContent: true, revision: 2, text: 'new note' })
+      b.shell.setDraft('new question')
+      b.shell.submit('queue', 'enter')
+      await n.settled.promise
+      expect(b.prompt).toHaveBeenCalledOnce()
+      gate.resolve('old question')
+      await b.runtime.flush()
+      expect(b.prompt.mock.calls.map(([content]) => content)).toEqual([
+        [{ type: 'text', text: 'new question\n\nnew note' }], [{ type: 'text', text: 'old question\n\nnote' }],
+      ])
+    } finally { gate.resolve('unused'); await b.runtime.dispose() }
+  })
+  it('drains slash adjudication on owner disposal without admitting its late ordinary fallback', async () => {
+    const b = await bench()
+    const gate = Promise.withResolvers<PickOutcome>()
+    try {
+      const n = note(b)
+      const entered = Promise.withResolvers<AbortSignal>()
+      codecs(b, async () => '', (_line, signal) => { entered.resolve(signal); return gate.promise })
+      b.shell.setDraft('/ordinary')
+      b.shell.submit('queue', 'enter')
+      const signal = await entered.promise
+      let drained = false
+      const disposal = n.off().then(() => { drained = true })
+      expect(signal.aborted).toBe(true)
+      await Promise.resolve()
+      expect(drained).toBe(false)
+      gate.resolve(undefined)
+      await disposal
+      await b.runtime.flush()
+      expect(b.prompt).not.toHaveBeenCalled()
+      expect(b.shell.snapshot.phase).toBe('plain')
+    } finally { gate.resolve(undefined); await b.runtime.dispose() }
+  })
+
+  it('keeps a slash ordinary fallback reserved through preparation under its original capture', async () => {
+    const b = await bench()
+    const gate = Promise.withResolvers<PickOutcome>()
+    try {
+      const n = note(b)
+      codecs(b, async () => '', () => gate.promise)
+      b.shell.setDraft('/ordinary')
+      b.shell.submit('queue', 'enter')
+      expect(b.root.submissions.storeFor('s1' as SessionId).getSnapshot().pending).toBe(true)
+      gate.resolve(undefined)
+      const attempt = await n.settled.promise
+      await b.runtime.flush()
+      expect(b.prompt).toHaveBeenCalledOnce()
+      expect(b.prompt).toHaveBeenCalledWith([{ type: 'text', text: '/ordinary\n\nnote' }], 'queue', expect.any(AbortSignal), attempt.requestId)
+      expect(b.root.submissions.storeFor('s1' as SessionId).getSnapshot().pending).not.toBe(true)
+    } finally { gate.resolve(undefined); await b.runtime.dispose() }
+  })
+
+  it('waits for every reference codec after one rejects before releasing the owner reservation', async () => {
+    const b = await bench()
+    const gate = Promise.withResolvers<string>()
+    try {
+      const n = note(b)
+      const entered = Promise.withResolvers<undefined>()
+      codecs(b, async (_source, ref) => {
+        if (ref === '@ref') throw new Error('first codec failed')
+        entered.resolve(undefined)
+        return gate.promise
+      })
+      insertChip(b)
+      const end = b.shell.editor.getEditorState().read(() => $composerLayout().detectLength)
+      expect(b.shell.insertReference({ source: 'reference', ref: '@second', label: 'Second', clipboardText: '@second' }, {
+        start: end, end, draftRev: b.shell.snapshot.draftRev,
+      })).toBe(true)
+      b.shell.submit('queue', 'click')
+      await entered.promise
+      await b.runtime.flush()
+      expect(b.root.submissions.storeFor('s1' as SessionId).getSnapshot().pending).toBe(true)
+      let drained = false
+      const disposal = n.off().then(() => { drained = true })
+      await Promise.resolve()
+      expect(drained).toBe(false)
+      gate.resolve('second reference')
+      await expect(disposal).rejects.toThrow('first codec failed')
+      await b.runtime.flush()
+      expect(b.prompt).not.toHaveBeenCalled()
+      expect(n.prepare).not.toHaveBeenCalled()
+    } finally { gate.resolve('unused'); await b.runtime.dispose() }
+  })
+
+  it('releases the capture if attachment preflight rejects before registry submission', async () => {
+    const b = await bench()
+    try {
+      note(b)
+      const session = b.runtime.sessions.binding('s1')!.session
+      await expect(b.root.sendSession(session, 'first', ['missing' as DraftAttachmentId], 'queue')).rejects.toThrow('no longer available')
+      expect(b.root.submissions.storeFor('s1' as SessionId).getSnapshot().pending).not.toBe(true)
+      expect((await b.root.sendSession(session, 'second', [], 'queue')).admission).toBe('accepted')
+      expect(b.prompt).toHaveBeenCalledOnce()
+    } finally { await b.runtime.dispose() }
+  })
+
   it('does not revive a withdrawn generation when an old input submits before scoped cleanup', async () => {
     const b = await bench()
     try {
@@ -70,6 +360,85 @@ describe('ConversationController', () => {
     } finally {
       await b.runtime.dispose()
     }
+  })
+
+  it('freezes programmatic contributions before async preparation and admits the prepared request identity', async () => {
+    const b = await bench()
+    try {
+      const state = createSnapshotStore<SubmissionContributionState>({ hasContent: true, revision: 1, text: 'old note' })
+      const entered = Promise.withResolvers<ConversationSubmissionAttempt>()
+      const gate = Promise.withResolvers<undefined>()
+      const prepare = vi.fn(async (attempt: ConversationSubmissionAttempt) => { entered.resolve(attempt); await gate.promise })
+      const settle = vi.fn()
+      b.scoped.registerContribution('s1' as SessionId, { id: 'note' as ConversationContributionId, state, prepare, settle })
+      const pending = b.root.sendSession(b.runtime.sessions.binding('s1')!.session, 'question', [], 'queue')
+      state.set({ hasContent: true, revision: 2, text: 'new note' })
+      const attempt = await entered.promise
+      expect(attempt.text).toBe('question\n\nold note')
+      expect(attempt.source).toBe('programmatic')
+      expect(b.prompt).not.toHaveBeenCalled()
+      gate.resolve(undefined)
+      expect((await pending).admission).toBe('accepted')
+      expect(b.prompt).toHaveBeenCalledWith([{ type: 'text', text: attempt.text }], 'queue', expect.any(AbortSignal), attempt.requestId)
+      expect(settle).toHaveBeenCalledWith(attempt, attempt.contributions[0], 'accepted')
+      expect(state.getSnapshot().text).toBe('new note')
+    } finally { await b.runtime.dispose() }
+  })
+
+  it('prevents contribution-only double clicks and retries lost ACK with identical content and requestId', async () => {
+    const b = await bench()
+    try {
+      const state = createSnapshotStore<SubmissionContributionState>({ hasContent: true, revision: 1, text: 'note' })
+      const settled = Promise.withResolvers<ConversationSubmissionAttempt>()
+      const prepare = vi.fn(async () => {})
+      const settle = vi.fn((attempt: ConversationSubmissionAttempt) => { settled.resolve(attempt) })
+      b.scoped.registerContribution('s1' as SessionId, { id: 'note' as ConversationContributionId, state, prepare, settle })
+      b.prompt.mockRejectedValueOnce(new Error('lost ACK'))
+      b.shell.submit('queue', 'click')
+      b.shell.submit('queue', 'click')
+      const attempt = await settled.promise
+      await b.runtime.flush()
+      expect(attempt.source).toBe('click')
+      expect(b.prompt).toHaveBeenCalledOnce()
+      expect(b.root.submissions.storeFor('s1' as SessionId).getSnapshot().pending).toBe(true)
+      b.shell.submit('queue', 'enter')
+      expect(b.prompt).toHaveBeenCalledOnce()
+      expect((await b.scoped.retrySubmission(attempt)).admission).toBe('accepted')
+      expect(b.prompt).toHaveBeenCalledTimes(2)
+      expect(b.prompt.mock.calls.map(([content, mode, _signal, requestId]) => ({ content, mode, requestId }))).toEqual([
+        { content: [{ type: 'text', text: 'note' }], mode: 'queue', requestId: attempt.requestId },
+        { content: [{ type: 'text', text: 'note' }], mode: 'queue', requestId: attempt.requestId },
+      ])
+      expect(prepare).toHaveBeenCalledOnce()
+    } finally { await b.runtime.dispose() }
+  })
+
+  it('does not bypass a failed durable prepare through public retrySubmission', async () => {
+    const b = await bench()
+    try {
+      const state = createSnapshotStore<SubmissionContributionState>({ hasContent: true, revision: 1, text: 'note' })
+      const entered = Promise.withResolvers<ConversationSubmissionAttempt>()
+      const prepare = vi.fn(async (attempt: ConversationSubmissionAttempt) => { entered.resolve(attempt); throw new Error('storage unavailable') })
+      b.scoped.registerContribution('s1' as SessionId, { id: 'note' as ConversationContributionId, state, prepare, settle: () => {} })
+      const first = await b.root.sendSession(b.runtime.sessions.binding('s1')!.session, '', [], 'queue')
+      expect(first.admission).toBe('rejected')
+      const attempt = await entered.promise
+      expect((await b.scoped.retrySubmission(attempt)).admission).toBe('rejected')
+      expect(prepare).toHaveBeenCalledTimes(2)
+      expect(b.prompt).not.toHaveBeenCalled()
+    } finally { await b.runtime.dispose() }
+  })
+
+  it.each([
+    ['gateway/bad-request', 'rejected'], ['gateway/internal', 'uncertain'], ['session/agent-busy', 'rejected'],
+  ] as const)('classifies contributed Host admission %s as %s', async (code, expected) => {
+    const b = await bench()
+    try {
+      const state = createSnapshotStore<SubmissionContributionState>({ hasContent: true, revision: 1, text: 'note' })
+      b.scoped.registerContribution('s1' as SessionId, { id: 'note' as ConversationContributionId, state, prepare: async () => {}, settle: () => {} })
+      b.prompt.mockResolvedValueOnce({ ok: false, error: new RemoteError(code, 'failed', {}) } as never)
+      expect((await b.root.sendSession(b.runtime.sessions.binding('s1')!.session, '', [], 'queue')).admission).toBe(expected)
+    } finally { await b.runtime.dispose() }
   })
 
   it('routes operations through the public Session binding', async () => {
@@ -399,12 +768,12 @@ describe('ConversationController', () => {
   it('keeps the accepted file draft until its rpcId appears in the Host queue', async () => {
     const b = await bench()
     const session = b.runtime.sessions.binding('s1')!.session
-    let retire: ((retirement: unknown) => void) | undefined
-    ;(session as unknown as { beginSubmission: (input: { onRetire?: (retirement: unknown) => void }) => unknown })
-      .beginSubmission = (input) => {
-        retire = input.onRetire
-        return { requestId: 'file-rpc-id', abandon: vi.fn() }
-      }
+    let retire: BeginSubmissionInput['onRetire']
+    const begin = vi.spyOn(session, 'beginSubmission').mockImplementation((input) => {
+      retire = input.onRetire
+      if (input.requestId === undefined) throw new Error('captured request id missing')
+      return { requestId: input.requestId, abandon: vi.fn() }
+    })
     ;(session as { uploadFile?: unknown }).uploadFile = vi.fn(() => Promise.resolve({
       ok: true as const,
       value: {
@@ -426,14 +795,14 @@ describe('ConversationController', () => {
     expect(b.prompt).toHaveBeenCalledWith([
       { type: 'file', receiptId: 'send-receipt' },
       { type: 'text', text: 'read' },
-    ], 'queue', undefined, expect.any(String))
+    ], 'queue', expect.any(AbortSignal), expect.any(String))
     expect(b.root.resolveDraftAttachments([attachment.id])).toHaveLength(1)
-    expect(b.prompt.mock.calls[0]?.[3]).toBe('file-rpc-id')
+    expect(b.prompt.mock.calls[0]?.[3]).toBe(begin.mock.calls[0]?.[0].requestId)
     retire?.({
       reason: 'observed',
-      attachments: [{ attachmentId: 'send-file', name: 'sent.pdf', bytes: 1 }],
+      attachments: [{ attachmentId: AttachmentId('send-file'), name: 'sent.pdf', bytes: 1 }],
     })
-    await expect(sending).resolves.toEqual({ kind: 'success' })
+    await expect(sending).resolves.toEqual({ kind: 'success', admission: 'accepted' })
     expect(b.root.resolveDraftAttachments([attachment.id])).toEqual([])
     await b.runtime.dispose()
   })
@@ -493,19 +862,27 @@ describe('sendSession submission echo', () => {
     const retire: { onRetire?: ((retirement: PendingSubmissionRetirement) => void) | undefined } = {}
     const abandon = vi.fn()
     const begun = Promise.withResolvers<BeginSubmissionInput>()
-    const beginSubmission = vi.fn((input: BeginSubmissionInput) => {
-      retire.onRetire = input.onRetire
+    const session = b.runtime.sessions.binding('s1')!.session
+    const readSnapshot = session.getSnapshot.bind(session)
+    let pending: ReturnType<typeof session.getSnapshot>['pendingSubmissions'] = []
+    const getSnapshot = vi.spyOn(session, 'getSnapshot').mockImplementation(() => ({ ...readSnapshot(), pendingSubmissions: pending }))
+    const beginSubmission = vi.spyOn(session, 'beginSubmission').mockImplementation((input: BeginSubmissionInput) => {
+      if (input.requestId === undefined) throw new Error('captured request id missing')
+      pending = [...pending, { requestId: input.requestId, placement: 'transcript', time: 0, text: input.text, attachments: input.attachments }]
+      retire.onRetire = (settlement) => {
+        pending = pending.filter(submission => submission.requestId !== input.requestId)
+        input.onRetire?.(settlement)
+      }
       begun.resolve(input)
-      return { requestId: 'req-echo' as never, abandon }
+      return { requestId: input.requestId, abandon }
     })
     await b.runtime.sessions.updateSessionSnapshot('s1', () => {})
-    const face = b.runtime.sessions.binding('s1')!.session as unknown as Record<string, unknown>
-    face['beginSubmission'] = beginSubmission
     const created = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:echo-1')
     const revoked = vi.spyOn(URL, 'revokeObjectURL').mockReturnValue(undefined)
     const restore = () => {
       created.mockRestore()
       revoked.mockRestore()
+      getSnapshot.mockRestore()
     }
     return { ...b, beginSubmission, begun: begun.promise, abandon, retire, revoked, restore }
   }
@@ -532,14 +909,17 @@ describe('sendSession submission echo', () => {
           { type: 'text', text: '带图' },
         ],
         'queue',
-        undefined,
-        'req-echo',
+        expect.any(AbortSignal),
+        echo.requestId,
       )
       // The draft stays registered until the echo's observed retirement.
+      expect(b.beginSubmission).toHaveBeenCalledOnce()
+      expect(b.root['submissionDrafts'].has(echo.requestId!)).toBe(true)
       expect(b.root.resolveDraftAttachments([attachment!.id])).toHaveLength(1)
       b.retire.onRetire?.({ reason: 'observed', attachments: [] })
-      await expect(sending).resolves.toEqual({ kind: 'success' })
+      await expect(sending).resolves.toEqual({ kind: 'success', admission: 'accepted' })
       expect(b.root.resolveDraftAttachments([attachment!.id])).toEqual([])
+      expect(b.root['submissionDrafts'].has(echo.requestId!)).toBe(false)
       expect(b.revoked).toHaveBeenCalledWith('blob:echo-1')
     } finally {
       b.restore()
@@ -603,8 +983,10 @@ describe('sendSession submission echo', () => {
           },
         ],
       })
-      await expect(sending).resolves.toEqual({ kind: 'success' })
+      await expect(sending).resolves.toEqual({ kind: 'success', admission: 'accepted' })
       expect(b.root.resolveDraftAttachments(drafts.map(draft => draft.id))).toEqual([])
+      expect(b.root['submissionDrafts'].has(echo.requestId!)).toBe(false)
+      expect(b.beginSubmission).toHaveBeenCalledOnce()
     } finally {
       b.restore()
     }
@@ -617,13 +999,13 @@ describe('sendSession submission echo', () => {
       await b.runtime.sessions.updateSessionSnapshot('s1', (draft) => { draft.running = true })
       const session = b.runtime.sessions.binding('s1')!.session
       await expect(b.root.sendSession(session, '立即纠偏', [], 'steer'))
-        .resolves.toEqual({ kind: 'success' })
+        .resolves.toEqual({ kind: 'success', admission: 'accepted' })
       expect(b.beginSubmission).toHaveBeenLastCalledWith(expect.objectContaining({
         mode: 'steer',
         text: '立即纠偏',
       }))
       await expect(b.root.sendSession(session, '稍后处理', [], 'queue'))
-        .resolves.toEqual({ kind: 'success' })
+        .resolves.toEqual({ kind: 'success', admission: 'accepted' })
       expect(b.beginSubmission).toHaveBeenLastCalledWith(expect.objectContaining({
         mode: 'queue',
         text: '稍后处理',
@@ -654,7 +1036,7 @@ describe('sendSession submission echo', () => {
         height: 1,
       }
       b.retire.onRetire?.({ reason: 'observed', attachments: [ref] })
-      await expect(sending).resolves.toEqual({ kind: 'success' })
+      await expect(sending).resolves.toEqual({ kind: 'success', admission: 'accepted' })
       expect(seedImageUrl).toHaveBeenCalledWith('s1', ref, 'blob:echo-1')
       expect(b.root.resolveDraftAttachments([attachment!.id])).toEqual([])
       expect(b.revoked).not.toHaveBeenCalled()
@@ -666,7 +1048,7 @@ describe('sendSession submission echo', () => {
     await b.runtime.dispose()
   })
 
-  it('keeps mixed image and file drafts when the echo retires as failed', async () => {
+  it.each(['rejected', 'uncertain'] as const)('retains mixed image/file references after %s admission for a same-id retry until observed', async (status) => {
     const b = await echoBench()
     try {
       const session = b.runtime.sessions.binding('s1')!.session
@@ -678,7 +1060,9 @@ describe('sendSession submission echo', () => {
         },
       }))
       b.prompt.mockResolvedValueOnce({
-        ok: false, error: new RemoteError('session/attachment-invalid', 'nope', { reason: 'nope' }),
+        ok: false, error: status === 'rejected'
+          ? new RemoteError('session/attachment-invalid', 'nope', { reason: 'nope' })
+          : new RemoteError('gateway/internal', 'nope', {}),
       } as never)
       const attachments = b.root.createDrafts(session.sessionId, [
         new File([Uint8Array.of(7)], 'kept.png', { type: 'image/png' }),
@@ -688,10 +1072,21 @@ describe('sendSession submission echo', () => {
         expect(b.root.fileUploads.getSnapshot()[attachments[1]!.id]?.status).toBe('ready')
       })
       await expect(b.root.sendSession(session, '失败', attachments.map(attachment => attachment.id), 'queue'))
-        .resolves.toEqual({ kind: 'error' })
+        .resolves.toEqual({ kind: 'error', admission: status })
+      const echo = await b.begun
+      const attempt = b.root.submissions.attemptFor(echo.requestId!)!
       b.retire.onRetire?.({ reason: 'failed' })
       expect(b.root.resolveDraftAttachments(attachments.map(attachment => attachment.id))).toHaveLength(2)
+      expect(b.root['submissionDrafts'].get(attempt.requestId)?.attachments).toEqual(attachments)
       expect(b.revoked).not.toHaveBeenCalled()
+      await expect(b.root.retrySubmission(attempt)).resolves.toEqual({ kind: 'success', admission: 'accepted' })
+      expect(b.beginSubmission).toHaveBeenCalledTimes(2)
+      expect(b.beginSubmission.mock.calls[1]?.[0]).toMatchObject({ requestId: attempt.requestId, attachments: echo.attachments })
+      expect(b.prompt.mock.calls[1]?.[0]).toEqual(b.prompt.mock.calls[0]?.[0])
+      expect(b.prompt.mock.calls[1]?.[3]).toBe(attempt.requestId)
+      b.retire.onRetire?.({ reason: 'observed', attachments: [] })
+      expect(b.root.resolveDraftAttachments(attachments.map(attachment => attachment.id))).toEqual([])
+      expect(b.root['submissionDrafts'].has(attempt.requestId)).toBe(false)
     } finally {
       b.restore()
     }
@@ -715,7 +1110,7 @@ describe('sendSession submission echo', () => {
       ])
       const session = b.runtime.sessions.binding('s1')!.session
       await expect(b.root.sendSession(session, 'x', [attachment!.id], 'queue'))
-        .rejects.toThrow('read failed')
+        .resolves.toEqual({ kind: 'error', admission: 'rejected', text: 'read failed' })
       expect(b.abandon).toHaveBeenCalledOnce()
       expect(b.prompt).not.toHaveBeenCalled()
     } finally {
@@ -730,8 +1125,8 @@ describe('sendSession submission echo', () => {
     vi.stubGlobal('requestAnimationFrame', undefined)
     try {
       const session = b.runtime.sessions.binding('s1')!.session
-      await expect(b.root.sendSession(session, '纯文本', [], 'queue')).resolves.toEqual({ kind: 'success' })
-      expect(b.prompt).toHaveBeenCalledWith([{ type: 'text', text: '纯文本' }], 'queue', undefined, 'req-echo')
+      await expect(b.root.sendSession(session, '纯文本', [], 'queue')).resolves.toEqual({ kind: 'success', admission: 'accepted' })
+      expect(b.prompt).toHaveBeenCalledWith([{ type: 'text', text: '纯文本' }], 'queue', expect.any(AbortSignal), b.beginSubmission.mock.calls[0]?.[0].requestId)
     } finally {
       vi.unstubAllGlobals()
       b.restore()
@@ -746,8 +1141,8 @@ describe('sendSession submission echo', () => {
       const session = b.runtime.sessions.binding('s1')!.session
       const sending = b.root.sendSession(session, '后台标签', [], 'queue')
       expect(b.prompt).not.toHaveBeenCalled()
-      await expect(sending).resolves.toEqual({ kind: 'success' })
-      expect(b.prompt).toHaveBeenCalledWith([{ type: 'text', text: '后台标签' }], 'queue', undefined, 'req-echo')
+      await expect(sending).resolves.toEqual({ kind: 'success', admission: 'accepted' })
+      expect(b.prompt).toHaveBeenCalledWith([{ type: 'text', text: '后台标签' }], 'queue', expect.any(AbortSignal), b.beginSubmission.mock.calls[0]?.[0].requestId)
     } finally {
       vi.unstubAllGlobals()
       b.restore()

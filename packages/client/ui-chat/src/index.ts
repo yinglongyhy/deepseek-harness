@@ -1,4 +1,5 @@
 /** Host registration for browser Chat preferences. */
+export type { ChatTextRevision, ChatTextSurfaceId } from './text-identities.ts'
 import type {} from '@deepseek-ai/dsh-settings'
 
 import type { Volatile, Context } from '@deepseek-ai/cordis'

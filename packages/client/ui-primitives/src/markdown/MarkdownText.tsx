@@ -11,7 +11,8 @@
  * full parse self-heals it.
  */
 
-import { memo, useMemo, useRef } from 'react'
+import { memo, useLayoutEffect, useMemo, useRef } from 'react'
+import { observeTextSurfaces, type ObserveMarkdownTextSurfaces } from './text-surfaces.ts'
 import type { ReactNode } from 'react'
 import clsx from 'clsx'
 import { IncrementalMarkdownParser } from './incremental.ts'
@@ -172,7 +173,7 @@ class StreamingRenderer {
  * absolute HTTP(S) images render directly.
  */
 export const MarkdownText = memo(function MarkdownText({
-  text, streaming = false, labels, fileMentions, pathImages, variant = 'body',
+  text, streaming = false, labels, fileMentions, pathImages, variant = 'body', observeSurfaces,
 }: {
   text: string
   streaming?: boolean
@@ -180,7 +181,10 @@ export const MarkdownText = memo(function MarkdownText({
   fileMentions?: MarkdownFileMentions | undefined
   pathImages?: MarkdownPathImages | undefined
   variant?: 'body' | 'compact'
+  /** Optional host text capability, registered only after a settled render commits. */
+  observeSurfaces?: ObserveMarkdownTextSurfaces | undefined
 }) {
+  const rootRef = useRef<HTMLDivElement>(null)
   const streamRef = useRef<StreamingRenderer | null>(null)
   const streamLabelsRef = useRef<MarkdownLabels>(labels)
   const children = useMemo(() => {
@@ -194,6 +198,10 @@ export const MarkdownText = memo(function MarkdownText({
     }
     return streamRef.current.render(text)
   }, [text, streaming, labels, fileMentions, pathImages])
-  return <div className={clsx(css.markdown, variant === 'compact' && css.compact)}
+  useLayoutEffect(() => {
+    if (streaming || observeSurfaces === undefined || rootRef.current === null) return
+    return observeTextSurfaces(rootRef.current, observeSurfaces)
+  }, [children, streaming, observeSurfaces])
+  return <div ref={rootRef} className={clsx(css.markdown, variant === 'compact' && css.compact)}
     data-markdown-variant={variant === 'compact' ? variant : undefined}>{children}</div>
 })

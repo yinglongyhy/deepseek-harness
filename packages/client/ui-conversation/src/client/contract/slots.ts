@@ -268,6 +268,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'conversation.hero.options': { kind: 'list'; scope: 'session' }
     /** Full-width entries above the composer card. */
     'conversation.input.dock': { kind: 'list'; scope: 'session'; owner: InputZone }
+    /** Additive business summaries inside the original composer card, above its editor. */
+    'conversation.input.summary': { kind: 'list'; scope: 'session' }
     /** Floating entries rendered inside the resident composer card. */
     'conversation.input.overlay': { kind: 'list'; scope: 'session' }
     /** Ambient entries below the composer card. */
@@ -476,6 +478,7 @@ export interface ComposerBarInjected {
     busyEnter: ObservableSnapshot<BusyEnterBehavior>
     /** Live per-draft upload states for file-kind drafts. */
     fileUploads: ObservableSnapshot<DraftFileUploads>
+    contributions: ObservableSnapshot<import('./contributions.ts').SubmissionContributionsState>
     notices: ObservableSnapshot<InputNotice | null>
     lexicon: ObservableSnapshot<ReadonlyMap<'/' | '@', readonly string[]>>
     menuLauncher: ObservableSnapshot<string | null>
@@ -498,7 +501,7 @@ export interface InputActivityOwnerProps extends InputControlOwnerProps {
 export type ComposerBarProps =
   PropsRuntime<'conversation.composer.bar'>
   & PropsRenderSlots<
-    | 'conversation.input.attachments' | 'conversation.input.overlay'
+    | 'conversation.input.attachments' | 'conversation.input.overlay' | 'conversation.input.summary'
     | 'conversation.input.permission'
     | 'conversation.input.left' | 'conversation.input.plan'
     | 'conversation.input.right' | 'conversation.input.model' | 'conversation.input.activity'

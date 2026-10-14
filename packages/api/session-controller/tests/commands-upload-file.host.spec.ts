@@ -16,7 +16,7 @@ import type { FileUploadReceiptId } from '@deepseek-ai/dsh-client-file-upload/ty
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { ApiSessionAgentController } from '../src/agent.ts'
 import { SessionCommandController } from '../src/commands.ts'
-import type { SessionRequestId } from '../src/types.ts'
+import type { SessionPromptRequest, SessionRequestId } from '../src/types.ts'
 
 const SESSION = SessionId('upload-session')
 
@@ -26,6 +26,7 @@ async function uploadHarness(origin?: 'subagent'): Promise<{
   uploads: FileUploads
   agent: Agent
   followup: ReturnType<typeof vi.fn>
+  steer: ReturnType<typeof vi.fn>
   saveFile: ReturnType<typeof vi.fn>
   saveFileStream: ReturnType<typeof vi.fn>
   saveImages: ReturnType<typeof vi.fn>
@@ -35,20 +36,24 @@ async function uploadHarness(origin?: 'subagent'): Promise<{
   const ctx = new Context()
   onTestFinished(() => ctx.fiber.dispose())
   await ctx.plugin(SessionStore)
+  ctx.on('session/flush', async () => {})
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(CommandRuntime)
   const session = ctx.sessions.create(SESSION, {
     meta: { cwd: '/workspace', ...(origin === undefined ? {} : { origin }) },
   })
   const inbox = createInboxStub()
-  const followup = vi.fn()
+  const followup = vi.fn((message: UserMessage) => {
+    session.append('agent/inbox/spliced', { target: 'next-turn', start: 0, inserted: [message] })
+  })
+  const steer = vi.fn()
   const agent = {
     id: session.id,
     session,
     inbox,
     status: 'idle',
     ctx: undefined,
-    steer: vi.fn(),
+    steer,
     followup,
     cancel: vi.fn(),
   } as unknown as Agent
@@ -105,6 +110,7 @@ async function uploadHarness(origin?: 'subagent'): Promise<{
     uploads,
     agent,
     followup,
+    steer,
     saveFile,
     saveFileStream,
     saveImages,
@@ -354,7 +360,37 @@ describe('Session file uploads', () => {
     expect(followup).toHaveBeenCalledOnce()
   })
 
-  it('deduplicates a retried rpcId already present in the durable log', async () => {
+  it.each(['changed images', 'changed mode'] as const)('queries original admission for %s on a repeated requestId', async (change) => {
+    const { controller, followup, steer, saveImages } = await uploadHarness()
+    saveImages.mockResolvedValueOnce([{
+      attachmentId: AttachmentId('original-image'), mediaType: 'image/png', bytes: 3,
+      width: 1, height: 1, name: 'original.png',
+    }])
+    const original = promptRequest([{ type: 'image', mediaType: 'image/png', data: 'AAAA', name: 'original.png' }])
+    await expect(controller.prompt(original, USER_SOURCE)).resolves.toEqual({ accepted: true })
+    const repeated: SessionPromptRequest = change === 'changed images'
+      ? { ...original, content: [{ type: 'image', mediaType: 'image/jpeg', data: 'AQ==', name: 'changed.jpg' }] }
+      : { ...original, mode: 'steer' }
+    await expect(controller.prompt(repeated, USER_SOURCE)).resolves.toEqual({ accepted: true })
+    expect(followup).toHaveBeenCalledOnce()
+    expect(steer).not.toHaveBeenCalled()
+    expect(saveImages).toHaveBeenCalledOnce()
+  })
+
+  it('queries original admission without resolving its retired file receipt', async () => {
+    const { controller, uploads, agent, followup } = await uploadHarness()
+    const receipt = await uploads.upload(agent, { data: 'AAAA' }, new AbortController().signal)
+    const request = promptRequest([{ type: 'file', receiptId: receipt.receiptId }])
+    await controller.prompt(request, USER_SOURCE)
+    uploads.retirePrompt(agent, request.requestId)
+    expect(uploads.resolve(agent, receipt.receiptId)).toBeUndefined()
+    const resolve = vi.spyOn(uploads, 'resolve')
+    await expect(controller.prompt(request, USER_SOURCE)).resolves.toEqual({ accepted: true })
+    expect(resolve).not.toHaveBeenCalled()
+    expect(followup).toHaveBeenCalledOnce()
+  })
+
+  it('queries original durable admission without comparing repeated text', async () => {
     const { controller, agent, followup } = await uploadHarness()
     const request = promptRequest([{ type: 'text', text: 'once' }])
     agent.session.append('turn/start', { turn: 1 })
@@ -386,7 +422,7 @@ describe('Session file uploads', () => {
     await expect(prompting).rejects.toMatchObject({ code: 'session/not-found' })
   })
 
-  it('rejects when a previously bound receipt retires during image admission', async () => {
+  it('reports uncertain admission when a previously bound receipt retires before rebinding', async () => {
     const { controller, uploads, agent, saveImages } = await uploadHarness()
     const receipt = await uploads.upload(agent, { data: 'AAAA' }, new AbortController().signal)
     await controller.prompt(promptRequest([{ type: 'file', receiptId: receipt.receiptId }]), USER_SOURCE)
@@ -405,7 +441,7 @@ describe('Session file uploads', () => {
       attachmentId: AttachmentId('admitted-image'), mediaType: 'image/png', bytes: 3, width: 1, height: 1,
     }])
     await expect(prompting).rejects.toMatchObject({
-      code: 'session/attachment-invalid', details: { reason: 'FILE_NOT_STAGED' },
+      code: 'session/prompt-uncertain', details: { reason: 'RemoteError: File was not uploaded for this session.' },
     })
   })
 
@@ -417,7 +453,7 @@ describe('Session file uploads', () => {
     await expect(controller.prompt({
       ...promptRequest([{ type: 'file', receiptId: receipt.receiptId }]),
       requestId: 'req-2' as SessionRequestId,
-    }, USER_SOURCE)).rejects.toMatchObject({ code: 'session/agent-busy' })
+    }, USER_SOURCE)).rejects.toMatchObject({ code: 'session/prompt-uncertain' })
     uploads.retirePrompt(agent, 'req-1')
     expect(uploads.resolve(agent, receipt.receiptId)).toBeUndefined()
   })
@@ -428,7 +464,7 @@ describe('Session file uploads', () => {
     followup.mockImplementationOnce(() => { throw new Error('busy') })
     await expect(controller.prompt(promptRequest([
       { type: 'file', receiptId: receipt.receiptId },
-    ]), USER_SOURCE)).rejects.toMatchObject({ code: 'session/agent-busy' })
+    ]), USER_SOURCE)).rejects.toMatchObject({ code: 'session/prompt-uncertain' })
     uploads.retirePrompt(agent, 'req-1')
     expect(uploads.resolve(agent, receipt.receiptId)).toEqual(receipt.file)
   })

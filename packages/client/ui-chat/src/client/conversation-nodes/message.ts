@@ -8,6 +8,10 @@ import { chatNode, contextLocation } from './common.ts'
 import { contextForm, contextProducer } from './event-projection.ts'
 
 interface ReferencedUserMessageNode extends UserMessageNode {
+  /** Durable user-message identity, independent of its render key. */
+  readonly messageId: import('@deepseek-ai/dsh-llm/brand').MessageId
+  /** Original initiator identity when submitted through the Session Controller. */
+  readonly requestId?: import('@deepseek-ai/dsh-api-session-controller/types').SessionRequestId
   /** Labels cited by the immediately following session-reference context. */
   readonly referenceLabels?: readonly string[]
   /** Skill names the same step's `skill-invocation` injections loaded. */
@@ -15,6 +19,8 @@ interface ReferencedUserMessageNode extends UserMessageNode {
 }
 
 interface ReferencedSteeringMessageNode extends SteeringMessageNode {
+  /** Original initiator identity retained when steering is admitted. */
+  readonly requestId?: import('@deepseek-ai/dsh-api-session-controller/types').SessionRequestId
   /** Labels cited by the immediately following session-reference context. */
   readonly referenceLabels?: readonly string[]
   /** Skill names the same step's `skill-invocation` injections loaded. */
@@ -92,9 +98,11 @@ export const messageDefinition: ConversationNodeDefinition<MessageNode> = {
     }
     const claimed = reader.previous<InboxState>('inbox-next-step')
       ?.state.currentClaimed.has(String(event.data.id)) === true
+    const request = 'rpcId' in event.data.source ? { requestId: event.data.source.rpcId } : {}
     return claimed
       ? {
         kind: 'steering',
+        ...request,
         messageId: event.data.id,
         seq: event.seq,
         time: event.time,
@@ -103,6 +111,8 @@ export const messageDefinition: ConversationNodeDefinition<MessageNode> = {
       }
       : {
         kind: 'user',
+        ...request,
+        messageId: event.data.id,
         seq: event.seq,
         time: event.time,
         content: event.data.content,

@@ -14,6 +14,7 @@ import { ReferenceChipNode } from '../src/client/input/editor/chip-node.tsx'
 import { TextRefNode } from '../src/client/input/editor/text-ref.ts'
 import { SessionInputShell } from '../src/client/input/facade.ts'
 import { InputHub } from '../src/client/input/hub.ts'
+import { SubmissionContributionRegistry } from '../src/client/submission-contributions.ts'
 import { zh } from '../src/client/locales.ts'
 
 const mention = '@src/main.ts'
@@ -47,7 +48,9 @@ async function storedSession(draft: unknown) {
   onTestFinished(() => { reference.release() })
   await reference.ready
   const binding = reference.binding
-  const hub = new InputHub(ctx, makeTranslate(zh, {}))
+  const submissions = new SubmissionContributionRegistry()
+  onTestFinished(() => submissions.dispose())
+  const hub = new InputHub(ctx, makeTranslate(zh, {}), submissions)
   return { ctx, sessions, id, key, raw, reference, binding, hub }
 }
 

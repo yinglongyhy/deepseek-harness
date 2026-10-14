@@ -4,10 +4,10 @@
   <p>
     <img alt="http image" class="_image_404681" decoding="async" loading="lazy" referrerpolicy="no-referrer" src="http://example.com/plain.png">
   <p>
-    <span class="_imageAlt_404681">
+    <span class="_imageAlt_404681" data-markdown-excluded="">
       #text "relative dropped"
     #text " and inline "
-    <span class="_imageAlt_404681">
+    <span class="_imageAlt_404681" data-markdown-excluded="">
       #text "bad scheme"
     #text " end."
   <p>

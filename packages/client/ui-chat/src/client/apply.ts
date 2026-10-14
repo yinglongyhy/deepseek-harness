@@ -1,12 +1,15 @@
 /** Register the Chat Conversation target, renderers, stats, and details surface. */
 import type {} from '@deepseek-ai/dsh-client-product-analytics/client'
 import type { Context } from '@deepseek-ai/cordis'
+import { ChatTextHost } from './text-host.ts'
+import type { ChatNode } from './contract/chat-nodes.ts'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type { SessionBinding } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { GroupKey } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { createSnapshotStore, type ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import { textEventCoverage } from './text-event-coverage.ts'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-browser/client'
 import type {} from '@deepseek-ai/dsh-client-ui-input-trigger/client'
@@ -135,6 +138,40 @@ export function apply(ctx: Context): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-chat: dictionaries')
   const t = ctx.locale.bind(NS)
   const chatStore = createChatStore()
+  const textViews = new Map<SessionId, (turn: number, answerStep: number) => void>()
+  const textHost = new ChatTextHost(async (source) => {
+    const binding = ctx.sessions.binding(source.sessionId)
+    if (binding === undefined) return { status: 'unavailable' }
+    try { await binding.session.loadThrough(source.seq) }
+    catch (_error: unknown) { return { status: 'unavailable' } }
+    if (ctx.sessions.binding(source.sessionId) !== binding) return { status: 'unavailable' }
+    const coverage = textEventCoverage(binding.eventSource.getSnapshot(), source.seq, source.messageId)
+    if (coverage !== 'covered') return { status: coverage }
+    ctx.uiConversation.binding(binding).activate('chat')
+    const snapshot = chatSource(binding).getSnapshot()
+    const node = snapshot.nodes.values()
+      .filter((candidate): candidate is ChatNode<'assistant-step'> => candidate.kind === 'assistant-step')
+      .find(candidate => candidate.data.finalNode?.messageId === source.messageId)
+    if (node?.kind !== 'assistant-step') return { status: 'unavailable' }
+    const blockIndex = Number(/^block:(\d+)\//u.exec(source.surfaceId)?.[1])
+    const block = node.data.blocks[blockIndex]
+    if (node.data.status !== 'settled' || node.data.finalNode?.seq !== source.seq
+      || block?.kind !== 'text' || block.text !== source.revision) return { status: 'changed' }
+    const reveal = textViews.get(source.sessionId)
+    if (reveal === undefined) return { status: 'unavailable' }
+    const spec = snapshot.nodes.processSource(node.key).getSnapshot()?.spec
+    if (spec !== undefined) reveal(spec.turn, spec.answerStep ?? 0)
+    return undefined
+  })
+  ctx.provide('chatText', textHost)
+  ctx.effect(() => {
+    document.addEventListener('selectionchange', textHost.selectionChanged)
+    return () => {
+      document.removeEventListener('selectionchange', textHost.selectionChanged)
+      textHost.dispose()
+      textViews.clear()
+    }
+  })
   const chatScrollPositions = new Map<SessionId, ChatScrollPosition>()
   const chatSettings = ctx.configForms.get<ChatSettings>(CHAT_SETTINGS_NAMESPACE)
   const linkOpening = createSnapshotStore(chatSettings.getSnapshot().value?.linkOpening ?? DEFAULT_LINK_OPENING)
@@ -169,7 +206,7 @@ export function apply(ctx: Context): void {
   const performancePolicy = new PerformanceUsagePolicy(chatSettings)
   ctx.effect(() => () => { transcriptView.dispose(); performancePolicy.dispose() })
   const performanceUsage = performancePolicy.mode
-  registerChatNodeRenderers(ctx, performanceUsage, presentation)
+  registerChatNodeRenderers(ctx, performanceUsage, presentation, textHost.registerText)
   ctx.slots.registerFactory({
     name: 'conversation.chat.user.content', scope: 'session', locale: NS,
     children: { 'conversation.chat.user.images': { kind: 'single', scope: 'session' } },
@@ -242,6 +279,10 @@ export function apply(ctx: Context): void {
         const chat = chatSource(binding)
         return {
           ...nodeSources(binding),
+          registerTextView: (reveal) => {
+            textViews.set(sessionId, reveal)
+            return () => { if (textViews.get(sessionId) === reveal) textViews.delete(sessionId) }
+          },
           fileMentions: (owner: TurnTailOwnerProps) => ctx.get('chatFileMentions')?.forClosing(owner, sessionId),
           // Files open in the right Sidebar, not in a desktop application: the
           // content stays in the product, beside the conversation that produced

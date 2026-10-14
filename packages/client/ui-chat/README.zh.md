@@ -41,11 +41,13 @@ kind: "package-reference"
 
 Session 作用域的 `conversation.chat.user.content` Factory 只渲染用户内容区域：文本、额外内容块、按输入顺序排列的图片／文件附件及引用摘要。[`UserContentInput`](src/client/contract/slots.ts) 携带预处理的 `content`、变换 `facts`、显示 props 和显式 `loadImage`；引用动作由节点自己的 Injection 提供。正文调用共享 `conversation.user.text` Factory，图片调用自身拥有的图片 Slot。直接调用需要 Session 绑定，行包装层由调用方提供。
 
-`UserStyleBubble` 和[各来源包装层](<src/client/chat/MessageItem.tsx#L157-L309>) 保留用户行、key、pending／echo 标记、时间、复制控件及其他消息操作。内容 Factory 不读取来源专属模型或私有 Context，也不是全局用户内容替换入口。
+`UserStyleBubble` 和[各来源包装层](src/client/chat/MessageItem.tsx) 保留用户行、key、pending／echo 标记、时间、复制控件及其他消息操作。持久消息与待处理消息的展示链可向原生气泡 Factory 传入仅用于显示的 `text`；两者均保留 `UserContent` → `UserText` 解析、变换事实、附件顺序和授权 `loadImage`。引用动作仍由文本节点的 Injection 提供，图片仍由内容 Factory 的用户图片 Slot 渲染。展示链未认领时使用原生气泡。内容 Factory 不读取来源专属模型或私有 Context，也不是全局用户内容替换入口。
 
 独立的 Markdown 图片以内嵌预览显示，点击打开共享图片浮层；本地路径在消息落定后基于当前查看的工作区解析。图片文件链接保持点击打开侧栏，鼠标停留或键盘聚焦时显示缩略图，Esc 关闭缩略图。图片加载失败时保留本地化状态与图片说明；不执行重复图片过滤。
 
 设置 → 通用设置 → 网页链接默认打开方式控制普通点击 Chat HTTP(S) 链接时的目标：「应用内侧边栏」（默认）打开新的右侧 Sidebar Browser tab，「默认浏览器」打开外部标签页。该设置项位于快捷键之后，仅在 Sidebar Browser 可用时显示。若 Sidebar Browser 未注册，两种选择均使用外部浏览器；带修饰键的点击保留原生行为。已认证浏览器的 `ui-chat.linkOpening` 偏好在 Host 上持久化，设置无法持久化写入时仅在当前进程内生效。已发送的文件引用及消息日志确认调用的 skill 也可在右侧栏打开预览。文件路径使用当前查看的 Session；skill 名称由该 Session 当前的输入触发源解析。两者悬停或聚焦时均使用正文文件链接的虚线下划线。会话、目录和命令标签仍只作为引用展示。
+
+已完成的 Assistant 正文支持精确选区与可撤销的 ChatText 装饰，也支持 Markdown 表格中的单个单元格。导航使用捕获的 Session、消息、序号、块、修订和可见文本偏移。历史加载后会验证事件覆盖情况，并区分事件缺失、来源变化与视图不可用，而不会猜测目标。精确范围高亮与较淡的消息提示持续三秒；再次导航会替换范围，provider 释放时会清除两者。共享标识通过仅含类型的 `/text-identities` 入口提供，`/client` 保留类型别名。
 
 <a id="system-prompt-row"></a>
 ## Chat 隐藏的行

@@ -32,6 +32,8 @@ export interface DraftAttachmentSerializationResult {
 /** Settled result of a command or default composer submission. */
 export interface SubmitOutcome {
   readonly kind: 'success' | 'error'
+  /** Ordinary-message Host admission; uncertain outcomes must not auto-restore drafts. */
+  readonly admission?: import('./contributions.ts').ConversationSubmissionStatus
   readonly text?: string
 }
 

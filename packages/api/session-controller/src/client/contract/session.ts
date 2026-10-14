@@ -30,6 +30,8 @@ export type PendingSubmissionRetirement =
 
 /** Input registering one local submission echo ahead of its prompt call. */
 export interface BeginSubmissionInput {
+  /** Retained ordinary request identity for same-id retry; absent mints a new identity. */
+  readonly requestId?: SessionRequestId
   /** Delivery mode used with the upcoming prompt. */
   readonly mode: 'queue' | 'steer'
   /** Prompt text exactly as the upcoming prompt will send it. */

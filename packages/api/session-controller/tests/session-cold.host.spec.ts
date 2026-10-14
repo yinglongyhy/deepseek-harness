@@ -704,6 +704,7 @@ describe('subagent ownership fence', () => {
     const ctx = new Context()
     await ctx.plugin(SessionStore)
     await ctx.plugin(AgentRegistry)
+    ctx.on('session/flush', async () => {})
     const session = ctx.sessions.create(sid('session-ordinary-fork'), {
       seed: [{
         type: 'subagent/descriptor',
@@ -734,6 +735,7 @@ describe('subagent ownership fence', () => {
     const ctx = new Context()
     await ctx.plugin(SessionStore)
     await ctx.plugin(AgentRegistry)
+    ctx.on('session/flush', async () => {})
     const session = ctx.sessions.create(sid('session-browser-zone'), { meta: { cwd: '/proj' } })
     const followup = vi.fn()
     const agent = {
@@ -852,6 +854,7 @@ describe('sessions.prompt synchronous rejection', () => {
     const ctx = new Context()
     await ctx.plugin(SessionStore)
     await ctx.plugin(AgentRegistry)
+    ctx.on('session/flush', async () => {})
     const session = ctx.sessions.create(sid('session-empty-prompt'))
     const followup = vi.fn()
     const steer = vi.fn()
@@ -944,7 +947,7 @@ describe('sessions.prompt synchronous rejection', () => {
     await ctx.fiber.dispose()
   })
 
-  it('maps a synchronous send throw (disposed/invalid input) to agent-busy with the reason attached', async () => {
+  it('reports synchronous delivery throws as uncertain because admission may have started', async () => {
     const ctx = new Context()
     await ctx.plugin(SessionStore)
     await ctx.plugin(AgentRegistry)
@@ -968,8 +971,8 @@ describe('sessions.prompt synchronous rejection', () => {
       }))
       expect(response.ok).toBe(false)
       if (!response.ok) {
-        expect(response.error.code).toBe('session/agent-busy')
-        expect(response.error.message).toBe('prompt rejected')
+        expect(response.error.code).toBe('session/prompt-uncertain')
+        expect(response.error.message).toBe('prompt admission could not be confirmed')
         expect(response.error.details).toEqual({
           reason: 'Error: agent "session-throwing" lifecycle disposed',
         })

@@ -15,6 +15,7 @@ import { subagentIdentityProjectionDefinition } from '@deepseek-ai/dsh-subagent/
 import { describe, expect, it, vi } from 'vitest'
 import { ApiSessionAgentController } from '../src/agent.ts'
 import { SessionCommandController } from '../src/commands.ts'
+import type { SessionPromptRequest, SessionRequestId } from '../src/types.ts'
 import { createInboxStub } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { installSessionReadTestServices, testSessionPersistence } from './test-remote.ts'
 
@@ -26,13 +27,17 @@ declare module '@deepseek-ai/dsh-llm' {
 
 async function commandHarness(
   childMode?: 'continuable' | 'seeded-continuable' | 'seed-only' | 'one-shot' | 'unknown' | 'corrupt',
+  promptSeed?: readonly SessionEvent[],
 ): Promise<{
   ctx: Context
   controller: SessionCommandController
   agent: Agent
   inbox: Inbox
   steer: ReturnType<typeof vi.fn>
+  followup: ReturnType<typeof vi.fn>
   cancel: ReturnType<typeof vi.fn>
+  disposeAgent: () => Promise<void>
+  disposeSession: () => Promise<void>
 }> {
   const ctx = new Context()
   await ctx.plugin(SessionStore)
@@ -48,10 +53,10 @@ async function commandHarness(
   // is appended after creation, as the continuation manager does. `seed-only`
   // never appends one: the identity folds as continuable, but from the
   // inherited prefix rather than this Session's own suffix.
-  const lineage = childMode === 'seeded-continuable' || childMode === 'seed-only'
+  const lineage = promptSeed ?? (childMode === 'seeded-continuable' || childMode === 'seed-only'
     ? ancestor.snapshotEvents()
-    : undefined
-  const session = ctx.sessions.create(sessionId, {
+    : undefined)
+  const session = ctx.sessions.prepare(sessionId, {
     ...lineage === undefined ? {} : { seed: lineage, inheritedEventCount: SessionLogOffset(lineage.length) },
     meta: {
       cwd: '/workspace',
@@ -61,6 +66,10 @@ async function commandHarness(
       }),
       ...lineage === undefined ? {} : { isSeeded: true },
     },
+  })
+  const disposeSession = ctx.effect(function* () {
+    yield ctx.sessions.enter(session)
+    ctx.sessions.announce(session)
   })
   if (childMode === 'continuable' || childMode === 'seeded-continuable') {
     session.append('subagent/descriptor', snapshotSubagentDescriptor({
@@ -78,8 +87,15 @@ async function commandHarness(
     } as never)
   }
   const inbox = createInboxStub()
-  const steer = vi.fn((message: UserMessage) => { inbox.append('next-step', message) })
+  const steer = vi.fn((message: UserMessage) => {
+    inbox.append('next-step', message)
+    session.append('agent/inbox/spliced', { target: 'next-step', start: 0, inserted: [message] })
+  })
   const cancel = vi.fn()
+  const followup = vi.fn((message: UserMessage) => {
+    inbox.append('next-turn', message)
+    session.append('agent/inbox/spliced', { target: 'next-turn', start: 0, inserted: [message] })
+  })
   const agent = {
     id: session.id,
     session,
@@ -87,10 +103,10 @@ async function commandHarness(
     status: 'running',
     ctx,
     steer,
-    followup: vi.fn(),
+    followup,
     cancel,
   } as unknown as Agent
-  await ctx.agents.register(agent)
+  const disposeAgent = await ctx.agents.register(agent)
   ctx.provide('workspaceRegistry', { get: () => undefined, list: () => [] } as never)
   ctx.provide('agentDefaultModel', {
     currentSelection: () => ({ provider: 'fixture', model: 'fixture-model' }),
@@ -114,13 +130,124 @@ async function commandHarness(
     agent,
     inbox,
     steer,
+    followup,
     cancel,
+    disposeAgent,
+    disposeSession,
   }
 }
 
 async function expectFailure(operation: Promise<unknown>, code: string): Promise<void> {
   await expect(operation).rejects.toMatchObject({ code })
 }
+
+describe('ordinary prompt durability and identity', () => {
+  async function bench(seed?: readonly SessionEvent[]) {
+    const b = await commandHarness(undefined, seed)
+    const admission = vi.fn(async (content: UserMessage['content']) => content)
+    b.ctx.provide('attachments', { admitPromptContent: admission } as never)
+    b.ctx.provide('fileUploads', {
+      bindPrompt: () => ({ commit: () => {}, [Symbol.dispose]: () => {} }),
+    } as never)
+    const request: SessionPromptRequest = {
+      sessionId: b.agent.id, requestId: 'same-request' as SessionRequestId,
+      mode: 'queue', content: [{ type: 'text', text: 'immutable question' }],
+    }
+    return { ...b, admission, request }
+  }
+
+  describe.each(['new', 'duplicate'] as const)('%s admission ownership', (admissionKind) => {
+    it.each(['agent-detached', 'agent-replaced', 'session-detached', 'session-replaced'] as const)(
+      'returns uncertain when %s while durability flush is pending', async (change) => {
+        const b = await bench()
+        const gate = Promise.withResolvers<undefined>()
+        const flush = vi.fn(() => gate.promise)
+        b.ctx.on('session/flush', flush)
+        if (admissionKind === 'duplicate') {
+          b.agent.session.append('user/message', createUserMessage({
+            content: [{ type: 'text', text: 'original' }],
+            source: { kind: 'user', rpcId: b.request.requestId },
+          }), { surfaceOp: 'append' })
+        }
+        const result = expectFailure(b.controller.prompt(b.request, { kind: 'user', rpcId: b.request.requestId }), 'session/prompt-uncertain')
+        try {
+          await vi.waitFor(() => { expect(flush).toHaveBeenCalledOnce() })
+          if (change.startsWith('agent-')) {
+            await b.disposeAgent()
+            if (change === 'agent-replaced') await b.ctx.agents.register({ ...b.agent })
+          } else {
+            await b.disposeSession()
+            if (change === 'session-replaced') b.ctx.sessions.create(b.agent.id, { meta: { cwd: '/workspace' } })
+          }
+          gate.resolve(undefined)
+          await result
+          expect(b.followup).toHaveBeenCalledTimes(admissionKind === 'new' ? 1 : 0)
+        } finally {
+          gate.resolve(undefined)
+          await Promise.allSettled([result])
+          await b.ctx.fiber.dispose()
+        }
+      },
+    )
+  })
+
+  it('admits concurrent same-id requests only once after asynchronous attachment admission', async () => {
+    const b = await bench()
+    const gate = Promise.withResolvers<undefined>()
+    b.admission.mockImplementation(async (content) => { await gate.promise; return content })
+    b.ctx.on('session/flush', async () => {})
+    try {
+      const first = b.controller.prompt(b.request, { kind: 'user', rpcId: b.request.requestId })
+      const second = b.controller.prompt(b.request, { kind: 'user', rpcId: b.request.requestId })
+      await vi.waitFor(() => { expect(b.admission).toHaveBeenCalledTimes(2) })
+      gate.resolve(undefined)
+      expect(await Promise.all([first, second])).toEqual([{ accepted: true }, { accepted: true }])
+      expect(b.followup).toHaveBeenCalledOnce()
+      expect(b.inbox.nextTurn).toHaveLength(1)
+    } finally { gate.resolve(undefined); await b.ctx.fiber.dispose() }
+  })
+
+  it.each(['splice', 'message'] as const)('retains an owned %s receipt after the inbox occurrence disappears', async (receipt) => {
+    const b = await bench()
+    b.ctx.on('session/flush', async () => {})
+    const message = createUserMessage({ content: b.request.content as UserMessage['content'], source: { kind: 'user', rpcId: b.request.requestId } })
+    if (receipt === 'splice') {
+      b.agent.session.append('agent/inbox/spliced', { target: 'next-turn', start: 0, inserted: [message] })
+      b.agent.session.append('agent/inbox/spliced', { target: 'next-turn', start: 0, removedCount: 1, inserted: [] })
+    } else b.agent.session.append('user/message', message, { surfaceOp: 'append' })
+    try {
+      expect(await b.controller.prompt(b.request, { kind: 'user', rpcId: b.request.requestId })).toEqual({ accepted: true })
+      expect(b.followup).not.toHaveBeenCalled()
+      expect(b.admission).not.toHaveBeenCalled()
+    } finally { await b.ctx.fiber.dispose() }
+  })
+
+  it('does not deduplicate ancestor receipts inherited by an ordinary fork', async () => {
+    const ancestor = Session.create(SessionId('prompt-ancestor'))
+    const message = createUserMessage({ content: [{ type: 'text', text: 'ancestor' }], source: { kind: 'user', rpcId: 'same-request' as SessionRequestId } })
+    ancestor.append('agent/inbox/spliced', { target: 'next-turn', start: 0, inserted: [message] })
+    ancestor.append('user/message', message, { surfaceOp: 'append' })
+    const b = await bench(ancestor.snapshotEvents())
+    b.ctx.on('session/flush', async () => {})
+    try {
+      expect(await b.controller.prompt(b.request, { kind: 'user', rpcId: b.request.requestId })).toEqual({ accepted: true })
+      expect(b.followup).toHaveBeenCalledOnce()
+    } finally { await b.ctx.fiber.dispose() }
+  })
+
+  it.each(['missing', 'failed'] as const)('returns uncertain with %s durability and retries only the existing admission', async (durability) => {
+    const b = await bench()
+    const unlisten = durability === 'failed' ? b.ctx.on('session/flush', async () => { throw new Error('disk unavailable') }) : () => {}
+    try {
+      await expectFailure(b.controller.prompt(b.request, { kind: 'user', rpcId: b.request.requestId }), 'session/prompt-uncertain')
+      expect(b.followup).toHaveBeenCalledOnce()
+      unlisten()
+      b.ctx.on('session/flush', async () => {})
+      expect(await b.controller.prompt(b.request, { kind: 'user', rpcId: b.request.requestId })).toEqual({ accepted: true })
+      expect(b.followup).toHaveBeenCalledOnce()
+    } finally { await b.ctx.fiber.dispose() }
+  })
+})
 
 describe('Session queue commands', () => {
   it('preserves the cold Agent resolver rejection', async () => {

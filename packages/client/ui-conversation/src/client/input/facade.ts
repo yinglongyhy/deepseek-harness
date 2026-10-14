@@ -23,6 +23,7 @@ import type {
   ArbitrateKey, ArbitrateOutcome, ComposerKeyboard, DraftInput, DraftSnapshot, Occurrence, ReferenceInsert, TokenSpan,
 } from '../contract/draft-editor.ts'
 import type { InputSubmitMode, MessageSubmission, MessageSubmissionState } from '../contract/composer-submission.ts'
+import type { CapturedConversationSubmission, SubmissionContributionsState } from '../contract/contributions.ts'
 import { SubmitMachine } from './machine.ts'
 import { resolveDraftInput, snapshotDraft } from '../draft.ts'
 import { DraftEditorRuntime } from './editor/runtime.ts'
@@ -56,12 +57,29 @@ export interface SessionInputDeps {
    * order (the empty-draft accelerated-Enter gesture); absent = unsupported.
    */
   steerQueue?: (() => void) | undefined
+  /** Eligibility from owner contributions, independent of editor text. */
+  contributions?: ObservableSnapshot<SubmissionContributionsState> | undefined
+  /** Freeze owner revisions and requestId before asynchronous serialization. */
+  captureSubmission?: (text: string, ids: readonly DraftAttachmentId[], mode: InputSubmitMode, source?: 'click' | 'enter') => CapturedConversationSubmission | undefined
+  /** Bind the synchronous reservation to the machine-owned cancellation signal. */
+  bindSubmission?: (capture: CapturedConversationSubmission, signal: AbortSignal) => AbortSignal
+  /** Track reference serialization through admission under the reserved capture. */
+  trackSubmission?: (
+    capture: CapturedConversationSubmission, signal: AbortSignal, execute: (signal: AbortSignal) => Promise<SubmitOutcome>,
+  ) => Promise<SubmitOutcome>
+  /** Track slash arbitration without releasing an ordinary-message fallback capture. */
+  trackAdjudication?: (
+    capture: CapturedConversationSubmission, signal: AbortSignal, execute: (signal: AbortSignal) => Promise<PickOutcome>,
+  ) => Promise<PickOutcome>
+  /** Release a capture whose adjudication did not select ordinary submission. */
+  releaseSubmission?: (capture: CapturedConversationSubmission) => void
   /** The plain-message sink (send choreography / materialize fork — the hub owns it). */
   defaultSink(
     text: string,
     attachmentIds: readonly DraftAttachmentId[],
     mode: InputSubmitMode,
     signal: AbortSignal,
+    capture?: CapturedConversationSubmission,
   ): Promise<SubmitOutcome>
   /** Command-plane attachment plumbing (the hub owns the conversation face and the copy). */
   commandAttachments: {
@@ -158,6 +176,7 @@ export class SessionInputShell implements SessionInput {
   private filePicker: Parameters<ComposerKeyboard['bindFilePicker']>[0] | undefined
   /** Default sends retained until admission settles or scope disposal releases their attachments. */
   private readonly detachedDrafts = new Map<number, DetachedDraft>()
+  private readonly submissionCaptures = new WeakMap<MessageSubmission, CapturedConversationSubmission>()
   /** Failed default sends waiting to be restored together in submission order. */
   private readonly failedDetached = new Map<number, DetachedDraft>()
   /** Revision of the last automatic failure restoration. */
@@ -384,28 +403,37 @@ export class SessionInputShell implements SessionInput {
    */
   submit(mode: InputSubmitMode = 'queue', source?: 'click' | 'enter'): void {
     if (this.disposed) return
+    const before = this.snapshot
+    if (before.phase === 'adjudicating' || before.phase === 'submitting') return
+    const contributionState = this.deps.contributions?.getSnapshot()
+    if (this.snapshot.phase !== 'claimed' && (contributionState?.blockReason !== undefined || contributionState?.pending === true)) return
     const timestamp = Date.now()
     let state: MessageSubmissionState | undefined
-    if (this.snapshot.phase === 'plain' && (this.snapshot.draft.trim() !== '' || this.attachmentIds.length > 0)) {
+    if (this.snapshot.phase === 'plain' && (this.snapshot.draft.trim() !== '' || this.attachmentIds.length > 0 || contributionState?.hasContent === true)) {
       try { state = this.deps.submissionState?.() } catch (_error) { /* Optional Session observations cannot interrupt submission. */ }
     }
     const submission: MessageSubmission = Object.freeze({
       timestamp, mode, ...source === undefined ? {} : { source }, ...state === undefined ? {} : { state },
     })
-    if (this.snapshot.draft.trim() === '' && this.attachmentIds.length > 0) {
+    if (this.snapshot.draft.trim() === '' && (this.attachmentIds.length > 0 || contributionState?.hasContent === true)) {
       if (this.snapshot.phase === 'plain') {
         const attachmentIds = [...this.attachmentIds]
+        let capture: CapturedConversationSubmission | undefined
+        try { capture = this.deps.captureSubmission?.('', attachmentIds, mode, source) } catch (error) {
+          this.notify('error', error instanceof Error ? error.message : String(error))
+          return
+        }
         const controller = new AbortController()
         this.attachmentFlightSeq += 1
         const flight = this.attachmentFlightSeq
         this.attachmentFlights.set(flight, { controller, attachmentIds })
         this.commitSend(attachmentIds)
         this.notifySubmission(submission)
-        void this.deps.defaultSink('', attachmentIds, mode, controller.signal).then((outcome) => {
+        void this.defaultSink('', attachmentIds, mode, controller.signal, capture).then((outcome) => {
           if (this.disposed || !this.attachmentFlights.delete(flight)) return
-          if (outcome.kind === 'success') return
-          this.restoreAttachments(attachmentIds)
           if (outcome.text !== undefined) this.notify('error', outcome.text)
+          if (outcome.kind === 'success' || outcome.admission === 'uncertain' || outcome.admission === 'accepted') return
+          this.restoreAttachments(attachmentIds)
         }, (error: unknown) => {
           if (this.disposed || !this.attachmentFlights.delete(flight)) return
           this.restoreAttachments(attachmentIds)
@@ -418,10 +446,18 @@ export class SessionInputShell implements SessionInput {
     // submits while attachments are present — one notice, everything retained.
     // Enter-time adjudication applies the same policy for unclaimed lines
     // inside the command source itself.
-    const before = this.snapshot
     if (before.phase === 'claimed' && this.attachmentIds.length > 0 && before.claim?.attachments !== true) {
       this.notify('error', this.deps.commandAttachments.unsupportedNotice(before.claim?.token ?? before.draft))
       return
+    }
+    if (before.phase !== 'claimed' && before.draft.trim() !== '') {
+      try {
+        const capture = this.deps.captureSubmission?.(this.projection.clipboardText, [...this.attachmentIds], mode, source)
+        if (capture !== undefined) this.submissionCaptures.set(submission, capture)
+      } catch (error) {
+        this.notify('error', error instanceof Error ? error.message : String(error))
+        return
+      }
     }
     this.dispatchRun({ type: 'enter', mode, draft: this.projection.clipboardText, submission })
     const phase = this.snapshot.phase
@@ -739,43 +775,50 @@ export class SessionInputShell implements SessionInput {
     const occurrences = this.projection.occurrences
     const record = { draft, occurrences, attachmentIds }
     this.detachedDrafts.set(attempt.seq, record)
+    let capture: CapturedConversationSubmission | undefined
+    try {
+      capture = attempt.submission === undefined ? undefined : this.submissionCaptures.get(attempt.submission)
+      capture ??= this.deps.captureSubmission?.(draft, attachmentIds, mode, attempt.submission?.source)
+    } catch (error) {
+      this.settleSink(attempt, Promise.reject(error instanceof Error ? error : new Error(String(error))))
+      return
+    }
     if (this.failedRestoreRev === this.rev) {
       this.failedDetached.clear()
       this.failedRestoreRev = undefined
     }
-    if (occurrences.length === 0) {
-      this.settleSink(attempt, this.deps.defaultSink(draft.trim(), attachmentIds, mode, attempt.signal))
+    if (occurrences.length === 0 && (capture === undefined || this.deps.trackSubmission === undefined)) {
+      this.settleSink(attempt, this.defaultSink(draft.trim(), attachmentIds, mode, attempt.signal, capture))
       return
     }
-    const inputTriggers = this.deps.inputTriggers?.()
-    void Promise.all(occurrences.map(async (o) => {
-      if (inputTriggers === undefined) throw new Error(`no serializer for reference source "${o.source}"`)
-      return {
-        offset: o.offset,
-        length: o.length,
-        text: await inputTriggers.serializeReference(o.source, o.ref, attempt.signal),
-      }
-    })).then(
-      (parts) => {
-        if (this.disposed) return
-        // Splice model forms over their clipboard ranges (offsets are
-        // clipboard-projection; parts arrive offset-sorted since chips walk in
-        // document order).
+    const serialize = async (signal: AbortSignal): Promise<SubmitOutcome> => {
+      let text = draft.trim()
+      if (occurrences.length > 0) {
+        const inputTriggers = this.deps.inputTriggers?.()
+        const results = await Promise.allSettled(occurrences.map(async (o) => {
+          if (inputTriggers === undefined) throw new Error(`no serializer for reference source "${o.source}"`)
+          return { offset: o.offset, length: o.length, text: await inputTriggers.serializeReference(o.source, o.ref, signal) }
+        }))
+        const parts = results.map((result) => {
+          if (result.status === 'rejected') throw result.reason
+          return result.value
+        })
+        // Reference offsets use the captured clipboard projection.
         let out = ''
         let cursor = 0
         for (const part of parts) {
           out += draft.slice(cursor, part.offset) + part.text
           cursor = part.offset + part.length
         }
-        out += draft.slice(cursor)
-        this.settleSink(attempt, this.deps.defaultSink(out.trim(), attachmentIds, mode, attempt.signal))
-      },
-      (error: unknown) => {
-        if (this.dead(attempt)) return
-        const message = error instanceof Error ? error.message : String(error)
-        this.settleDetachedFailure(attempt, message)
-      },
-    )
+        text = (out + draft.slice(cursor)).trim()
+      }
+      if (this.disposed || signal.aborted) throw new Error('submission cancelled before admission')
+      return this.defaultSink(text, attachmentIds, mode, signal, capture)
+    }
+    const pending = capture === undefined || this.deps.trackSubmission === undefined
+      ? serialize(attempt.signal)
+      : this.deps.trackSubmission(capture, attempt.signal, serialize)
+    this.settleSink(attempt, pending)
   }
 
   private notifySubmission(submission: MessageSubmission | undefined): void {
@@ -784,6 +827,18 @@ export class SessionInputShell implements SessionInput {
   }
 
   /** Settle one detached default send independently of other sends. */
+  private defaultSink(
+    text: string,
+    ids: readonly DraftAttachmentId[],
+    mode: InputSubmitMode,
+    signal: AbortSignal,
+    capture?: CapturedConversationSubmission,
+  ): Promise<SubmitOutcome> {
+    return capture === undefined
+      ? this.deps.defaultSink(text, ids, mode, signal)
+      : this.deps.defaultSink(text, ids, mode, signal, capture)
+  }
+
   private settleSink(
     attempt: SubmitAttempt,
     pending: Promise<SubmitOutcome>,
@@ -791,11 +846,12 @@ export class SessionInputShell implements SessionInput {
     pending.then(
       (outcome) => {
         if (this.dead(attempt)) return
-        if (outcome.kind !== 'success') {
+        if (outcome.kind !== 'success' && outcome.admission !== 'uncertain' && outcome.admission !== 'accepted') {
           this.settleDetachedFailure(attempt, outcome.text)
           return
         }
         this.detachedDrafts.delete(attempt.seq)
+        if (outcome.kind === 'error' && outcome.text !== undefined) this.notify('error', outcome.text)
         this.dispatchRun(({ type: 'sink-settled', attempt, ok: true, outcome }))
       },
       (error: unknown) => {
@@ -855,18 +911,32 @@ export class SessionInputShell implements SessionInput {
 
   /** Enter adjudication: poll the session controller; failure = notice + draft retained (never a silent downgrade). */
   private adjudicate(attempt: SubmitAttempt, draft: string): void {
+    const capture = attempt.submission === undefined ? undefined : this.submissionCaptures.get(attempt.submission)
+    const signal = capture === undefined ? attempt.signal : this.deps.bindSubmission?.(capture, attempt.signal) ?? attempt.signal
     const inputTriggers = this.deps.inputTriggers?.()
     if (inputTriggers === undefined) {
       // No pipeline mounted: the '/' line is an ordinary message.
       this.dispatchRun(({ type: 'adjudicated', attempt, outcome: undefined }))
       return
     }
-    inputTriggers.adjudicate(draft.trim(), attempt.signal, { attachments: this.attachmentIds.length }).then(
+    const attachments = this.attachmentIds.length
+    const adjudicate = (currentSignal: AbortSignal): Promise<PickOutcome> =>
+      inputTriggers.adjudicate(draft.trim(), currentSignal, { attachments })
+    const pending = capture === undefined || this.deps.trackAdjudication === undefined
+      ? adjudicate(signal)
+      : this.deps.trackAdjudication(capture, signal, adjudicate)
+    pending.then(
       (outcome: PickOutcome) => {
         if (this.dead(attempt)) return
+        if (signal.aborted) {
+          this.dispatchRun({ type: 'adjudication-failed', attempt, message: 'submission cancelled before admission' })
+          return
+        }
+        if (outcome !== undefined && capture !== undefined) this.deps.releaseSubmission?.(capture)
         this.dispatchRun(({ type: 'adjudicated', attempt, outcome }))
       },
       (error: unknown) => {
+        if (capture !== undefined) this.deps.releaseSubmission?.(capture)
         if (this.dead(attempt)) return
         const message = error instanceof Error ? error.message : String(error)
         this.dispatchRun(({ type: 'adjudication-failed', attempt, message }))

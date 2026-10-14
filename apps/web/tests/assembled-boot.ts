@@ -280,7 +280,7 @@ export function mountAssembledApp(options: AssembledBootOptions = {}): Assembled
   const plugins = PLUGINS.filter(plugin => !excluded.has(plugin.id))
   const remote = createAssembledRemote(options.remote)
   mountedRemote = remote.mock
-  win.__DSH_TRANSPORT__ = { rpc: remote.mock.rpc }
+  win.__DSH_TRANSPORT__ = { rpc: remote.rpc }
   history.replaceState(null, '', '/')
   const root = document.createElement('div')
   root.id = 'root'

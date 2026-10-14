@@ -176,6 +176,7 @@ async function scopedBench(register?: (inputTriggers: InputTriggerService) => vo
     keyboard: shell,
     addFiles: () => null,
     useFileUploads: bindSnapshotSelector(createSnapshotStore({})),
+    useContributions: bindSnapshotSelector(createSnapshotStore({ hasContent: false })),
     retryFileUpload: undefined,
     removeAttachment: () => {},
     // Every id resolves so the bar's registry prune never drops a test image.

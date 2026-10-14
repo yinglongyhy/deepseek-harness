@@ -930,10 +930,11 @@ workspaceDesktop(): { name: string; available: boolean; fileManager: 'finder' | 
 @Remote('fork') async fork(request: SessionForkRequest): Promise<SessionForkValue>
 
 /**
- * Admit one prompt after explicitly resuming its Session.
- * @param request - Session identity, prompt content, source metadata, and delivery mode.
+ * Admit one prompt or confirm its original admission after explicitly resuming its Session.
+ * @param request - Session identity, single-use request identity, prompt content, time zone, and delivery mode.
  * @param signal - caller cancellation before prompt admission begins.
- * @returns acknowledgement that the Agent accepted the prompt.
+ * @returns acknowledgement after Session durability and unchanged ownership are confirmed.
+ * @throws RemoteError with `session/prompt-uncertain` when the caller must retain the same request identity and content.
  */
 @Remote('prompt') async prompt(request: SessionPromptRequest, signal: AbortSignal): Promise<SessionPromptValue>
 

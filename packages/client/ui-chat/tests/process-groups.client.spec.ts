@@ -47,7 +47,7 @@ function separator(seq: number, inTurn: boolean): ChatNode<'user'> | ChatNode<'s
     location: inTurn ? { kind: 'turn', turn } : { kind: 'session' }, visibility: 'visible',
     // Neither location is the Step 1 that opens an exchange.
     groupTree: 'input',
-    data: { kind: 'user', seq, time: seq, content: [{ type: 'text', text: 'continue' }], source: null },
+    data: { kind: 'user', seq, time: seq, messageId: `user-${seq}` as MessageId, content: [{ type: 'text', text: 'continue' }], source: null },
   }
   return inTurn ? { ...user, kind: 'steering', data: { ...user.data, kind: 'steering', messageId: 'steer' as MessageId } } : user
 }

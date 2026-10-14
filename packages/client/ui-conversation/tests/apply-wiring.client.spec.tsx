@@ -6,7 +6,8 @@ import {
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { createSnapshotStore, type ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import { apply, inject, type ViewTab } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import { apply, inject, type ComposerBarInjected, type ConversationContributionId, type SubmissionContributionState, type ViewTab } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { Context } from '@deepseek-ai/cordis'
 
 usePinnedBrowserLanguages('zh-CN')
 
@@ -133,6 +134,36 @@ describe('target-neutral Conversation apply wiring', () => {
 
     disposeView()
     await vi.waitFor(() => { expect(source?.getSnapshot()).toEqual([]) })
+    await b.runtime.dispose()
+  })
+
+  it('declares the summary child and binds reactive contributions to the registering plugin lifetime', async () => {
+    const b = await bench()
+    await b.runtime.sessions.add({ id: SID })
+    using reference = b.runtime.sessions.retain(SID)
+    await reference.ready
+    expect(b.runtime.slots.spec('conversation.input.summary')).toEqual({ kind: 'list', scope: 'session' })
+    const bar = b.runtime.slots.entries('conversation.composer.bar')[0]!
+    const injectBar = bar.inject as (sessionId: SessionId) => Pick<ComposerBarInjected, 'hooks'>
+    const source = injectBar(SID).hooks.contributions
+    expect(source).toBe(b.runtime.ctx.conversation.submissions.storeFor(SID))
+    const state = createSnapshotStore<SubmissionContributionState>({ hasContent: true, revision: 1, text: 'note' })
+    const contribution = {
+      id: 'probe' as ConversationContributionId, state,
+      prepare: vi.fn(async () => {}), settle: vi.fn(),
+    }
+    const plugin = { inject: ['conversation'], apply(ctx: Context) { ctx.conversation.registerContribution(SID, contribution) } }
+    const owner = await b.runtime.mount(plugin)
+    expect(source.getSnapshot()).toEqual({ hasContent: true })
+    state.set({ hasContent: true, revision: 2, text: 'note', blockReason: 'Saving' })
+    expect(source.getSnapshot()).toEqual({ hasContent: true, blockReason: 'Saving' })
+    await owner.dispose()
+    expect(source.getSnapshot()).toEqual({ hasContent: false })
+    const replacement = await b.runtime.mount(plugin)
+    expect(source.getSnapshot().hasContent).toBe(true)
+    await replacement.dispose()
+    await b.feature.dispose()
+    expect(b.runtime.slots.spec('conversation.input.summary')).toBeUndefined()
     await b.runtime.dispose()
   })
 

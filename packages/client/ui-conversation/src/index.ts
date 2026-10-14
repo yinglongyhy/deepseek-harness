@@ -1,4 +1,5 @@
 /** Host registration for browser conversation preferences. */
+export type { ConversationContributionId } from './contribution-identity.ts'
 import type {} from '@deepseek-ai/dsh-settings'
 
 import type { Volatile, Context } from '@deepseek-ai/cordis'

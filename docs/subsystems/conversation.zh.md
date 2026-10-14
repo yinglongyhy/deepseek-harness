@@ -287,6 +287,14 @@ Assembler 会记录这项依赖。如果后续 older prepend 带来了更近的�
 
 `publication` 控制发生 State 变更后何时物化。结构或 terminal 变化使用 `immediate`，高频可见 delta 使用 `animation-frame`，只为后续发布积累 State 时使用 `none`。引擎按日志顺序应用每条 scalar update，并用一次 batch update 应用一个 packed run；该选项只合并视图发布频率。
 
+## 已完成文本 contribution 与提交尝试
+
+[`ChatTextService`](../../packages/client/ui-chat/src/client/contract/text.ts) 提供已完成助手内容的选择、几何信息、按所有者隔离的装饰和精确来源导航，不暴露 renderer 对象。`ChatTextSelection` 将带品牌的 Session、消息、surface 和修订身份与持久 seq 及可见文本的半开 UTF-16 偏移配对。`ChatTextNavigationResult` 区分 `revealed`、`missing`、`changed` 和 `unavailable`；历史加载操作返回本身不代表来源已被覆盖。
+
+[提交 contribution 声明](../../packages/client/ui-conversation/src/client/contract/contributions.ts) 为每项 contribution 分配稳定所有者和修订。准备阶段在传输前冻结一次普通尝试；结算单独记录 accepted、rejected 或 uncertain 接收结果，不将其等同于模型执行。恢复、对账和重试保留该尝试的请求身份。[conversation 包](../../packages/client/ui-conversation/README.zh.md)负责调用方生命周期和失败规则。
+
+Chat 的[展示 slot 声明](../../packages/client/ui-chat/src/client/contract/slots.ts)分别为持久用户消息和待接收提交提供 chain。其原生 factory 在允许仅影响展示的文本投影时，仍保留附件与原生操作。[批注插件](../../packages/client/conversation-annotations/README.zh.md)使用这些能力并拥有自己的 sidecar 记录；结构化批注状态不是 Session 事件族。
+
 ## 验证要求
 
 添加聚焦测试，证明以下结果：

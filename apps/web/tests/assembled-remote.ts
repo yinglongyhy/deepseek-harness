@@ -106,6 +106,8 @@ export interface AssembledRemoteOptions {
 
 export interface AssembledRemote {
   readonly mock: RemoteMock
+  /** Gateway calls plus read-only annotation sidecars for this fixture. */
+  readonly rpc: RemoteMock['rpc']
 }
 
 const fixtureSource = readFileSync(
@@ -364,7 +366,21 @@ export function createAssembledRemote(options: AssembledRemoteOptions = {}): Ass
     })
   })
 
-  return { mock }
+  return {
+    mock,
+    rpc: {
+      ...mock.rpc,
+      call: async (channel, endpoint, payload, signal) => {
+        if (channel !== '/conversation-annotations') return mock.rpc.call(channel, endpoint, payload, signal)
+        signal?.throwIfAborted()
+        // This fixture has no annotation sidecars; mutations use the real Host scaffold.
+        recordString(payload, 'sessionId')
+        if (endpoint === 'list') return { ok: true, value: [] }
+        if (endpoint === 'read') return { ok: true, value: null }
+        throw new Error(`assembled fixture: annotation ${endpoint} is not configured`)
+      },
+    },
+  }
 }
 
 function eventOf(

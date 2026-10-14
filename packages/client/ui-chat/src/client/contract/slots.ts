@@ -314,8 +314,10 @@ export interface ChatViewInjected {
   openExternalLink: (url: string) => void
   openFile: (path: string, options?: OpenFileOptions) => Promise<void>
   loadOlder: () => void
-  /** Jump loader: page history back through seq; resolves when the window covers it. */
+  /** Jump loader: page history back through seq; callers must verify event-window coverage afterward. */
   loadThrough: (seq: SessionSeq) => Promise<void>
+  /** Register the current Chat View's operation for opening a Turn process row. */
+  registerTextView: (reveal: (turn: number, answerStep: number) => void) => () => void
   loadImage: MessageImageLoader
   chatScroll: {
     save: (position: ChatScrollPosition | null) => void
@@ -336,6 +338,20 @@ export interface ChatFlowOwnerProps extends Pick<ChatNodeOwnerProps,
   readonly lastInputTurn: number | undefined
   readonly deferCollapse: boolean
 }
+
+/** Original durable user node and authorized loader; native text factories own reference actions. */
+export type UserMessagePresentationOwnerProps = Pick<ChatNodeOwnerProps, 'loadImage'> & {
+  readonly node: ChatNode<'user'> | ChatNode<'steering'>
+}
+/** Display-only text projection; persisted content and attachments remain unchanged. */
+export type UserMessageBubbleOwnerProps = UserMessagePresentationOwnerProps & { readonly text?: string }
+/** Local echo or Host steering item with its authorized image loader. */
+export interface PendingUserMessagePresentationOwnerProps {
+  readonly input: PendingSubmission | InboxState['next-step'][number]
+  readonly loadImage: MessageImageLoader
+}
+/** Display-only pending text projection, preserving previews and placement markers. */
+export type PendingUserMessageBubbleOwnerProps = PendingUserMessagePresentationOwnerProps & { readonly text?: string }
 
 /** Full props of the Chat-owned flow renderer. */
 export type ChatFlowSlotProps =
@@ -377,6 +393,30 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
       locale: 'chat'
       children: { 'conversation.chat.user.images': { kind: 'single'; scope: 'session' } }
     }
+    /** Native pending bubble shared by default and plugin-projected presentations. */
+    'conversation.chat.pending-user-message': {
+      scope: 'session'
+      locale: 'chat'
+      props: PendingUserMessageBubbleOwnerProps
+    }
+    /** One presentation chain shared by local echoes and Host steering occurrences. */
+    'conversation.chat.pending-user-message-presentation': {
+      scope: 'session'
+      props: PendingUserMessagePresentationOwnerProps
+      children: { 'conversation.chat.pending-user-presentation': { kind: 'chain'; scope: 'session' } }
+    }
+    /** Native durable user bubble shared by default and plugin-projected presentations. */
+    'conversation.chat.user-message': {
+      scope: 'session'
+      locale: 'chat'
+      props: UserMessageBubbleOwnerProps
+    }
+    /** One presentation chain shared by opening and admitted steering nodes. */
+    'conversation.chat.user-message-presentation': {
+      scope: 'session'
+      props: UserMessagePresentationOwnerProps
+      children: { 'conversation.chat.user-presentation': { kind: 'chain'; scope: 'session' } }
+    }
     /** Session-independent reasoning Markdown with Chat labels and compact typography. */
     'conversation.chat.reasoning.content': {
       scope: 'root'
@@ -386,6 +426,10 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 
   interface SlotMap {
+    /** First matching presentation wins; all-decline uses the native durable bubble. */
+    'conversation.chat.user-presentation': { kind: 'chain'; scope: 'session'; owner: UserMessagePresentationOwnerProps }
+    /** Select routes plain input; plugin framework hooks verify prepared identities and content. */
+    'conversation.chat.pending-user-presentation': { kind: 'chain'; scope: 'session'; owner: PendingUserMessagePresentationOwnerProps }
     /** Ordered Chat rows and local echoes with viewport-bound visibility hooks. */
     'conversation.chat.flow': {
       kind: 'single'

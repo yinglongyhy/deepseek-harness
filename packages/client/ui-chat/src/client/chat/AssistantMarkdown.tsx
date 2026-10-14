@@ -1,4 +1,4 @@
-import { Fragment, memo, useMemo } from 'react'
+import { Fragment, memo, useCallback, useMemo, useState } from 'react'
 import { fileMediaUrl } from '@deepseek-ai/dsh-util-workspace-path'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ReactNode } from 'react'
@@ -7,6 +7,7 @@ import type { MarkdownFileMentions, MarkdownPathImages } from '@deepseek-ai/dsh-
 import type { ChatNodeOwnerProps, ChatViewSlotProps, UseDisclosure, UsePresentation, UseGroupAction } from '../contract/slots.ts'
 import type { AssistantBlock } from '../contract/snapshot.ts'
 import { markdownLabels } from '../markdown-labels.ts'
+import type { ChatTextInjected, CompletedMarkdownSource } from '../text-host.ts'
 import { ReasoningRow } from './ReasoningRow.tsx'
 import css from './AssistantMarkdown.module.css'
 
@@ -50,20 +51,35 @@ export interface AssistantMarkdownProps extends
   mentions?: MarkdownFileMentions | undefined
   /** The owning view's locale seat, passed down as a plain prop. */
   t: ChatViewSlotProps['t']
+  /** Durable source identity exists only for a completed Assistant response. */
+  textSource?: Omit<CompletedMarkdownSource, 'block' | 'text'> | undefined
+  /** Registers renderer-owned text surfaces with the ChatText host. */
+  registerText?: ChatTextInjected['registerText'] | undefined
 }
 
 /** Renders non-blank reasoning blocks as independent disclosures alongside the response. */
 export const AssistantMarkdown = memo(function AssistantMarkdown({
   blocks, streaming, interrupted, loadImage, groupPart, useDisclosure,
   reasoningHidden = false, usePresentation, revealProcess, mentions, renderSlot, useGroupAction, t,
+  textSource, registerText,
 }: AssistantMarkdownProps) {
   // Stable per locale revision (t identity changes on switch): a fresh object
   // per render would rebuild MarkdownText's component table every chunk.
   const labels = useMemo(() => markdownLabels(t), [t])
+  const [textHighlighted, setTextHighlighted] = useState(false)
+  const highlightText = useCallback((active: boolean) => { setTextHighlighted(active) }, [])
   // MarkdownText memoizes its vocabulary; keep its identity stable across renders.
   const pathImages = useMemo<MarkdownPathImages>(() => {
     return { resolve: value => localPathMediaUrl(document.baseURI, value) }
   }, [])
+  const textObservers = useMemo(() => {
+    if (textSource === undefined || registerText === undefined) return []
+    return blocks.map((block, blockIndex) => block.kind === 'text'
+      ? (surfaces: Parameters<ChatTextInjected['registerText']>[1]) => registerText({
+        ...textSource, block: blockIndex, text: block.text,
+      }, surfaces, highlightText)
+      : undefined)
+  }, [blocks, highlightText, registerText, textSource])
   const last = blocks.length - 1
   // Tool-call heads render as tool rows in the chat view's grouping pass, so
   // a node that is only those heads (or empty) would paint an empty root
@@ -88,6 +104,7 @@ export const AssistantMarkdown = memo(function AssistantMarkdown({
             labels={labels}
             fileMentions={mentions}
             pathImages={pathImages}
+            observeSurfaces={textObservers[i]}
           />,
         )
         break
@@ -143,7 +160,7 @@ export const AssistantMarkdown = memo(function AssistantMarkdown({
     }
   }
   return (
-    <div className={css.root} data-streaming={streaming || undefined}>
+    <div className={css.root} data-streaming={streaming || undefined} data-chat-text-highlighted={textHighlighted || undefined}>
       <div className={css.body}>
         {rendered}
         {interrupted && (groupPart === undefined || groupPart === 'response'

@@ -285,6 +285,14 @@ With `D` registered Definitions, one incoming scalar event or packed run perform
 
 `publication` controls when changed State is materialized. Use `immediate` for structural or terminal changes, `animation-frame` for high-frequency visible deltas, and `none` when the State change feeds only a later publication. The engine applies every scalar update in log order and every packed run in one batch update; cadence only coalesces view publication.
 
+## Completed-text contributions and submission attempts
+
+[`ChatTextService`](../../packages/client/ui-chat/src/client/contract/text.ts) exposes completed assistant selection, geometry, owner-scoped decorations, and exact source navigation without exposing renderer objects. `ChatTextSelection` pairs branded Session, message, surface, and revision identities with a durable sequence and half-open UTF-16 visible-text offsets. `ChatTextNavigationResult` distinguishes `revealed`, `missing`, `changed`, and `unavailable`; a resolved history-load operation alone does not certify source coverage.
+
+The [submission contribution declarations](../../packages/client/ui-conversation/src/client/contract/contributions.ts) assign each contribution a stable owner and revision. Preparation freezes one ordinary attempt before transport; settlement records accepted, rejected, or uncertain admission separately from model execution. Restore, reconcile, and retry retain that attempt's request identity. The [conversation package](../../packages/client/ui-conversation/README.md) owns the caller lifecycle and failure rules.
+
+Chat's [presentation slot declarations](../../packages/client/ui-chat/src/client/contract/slots.ts) provide separate chains for durable user messages and pending submissions. Their native factories preserve attachments and native actions while allowing display-only text projection. The [annotation plugin](../../packages/client/conversation-annotations/README.md) consumes these capabilities and owns its sidecar records; structured annotation state is not a Session event family.
+
 ## Verification obligations
 
 Add focused tests that establish these outcomes:

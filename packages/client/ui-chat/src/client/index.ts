@@ -29,6 +29,11 @@ export type {
 } from './contract/chat-nodes.ts'
 export type { ChatGroupTree } from './contract/group-tree.ts'
 export type { ChatStoreState, ToolCallId, TurnProcessViewEntry } from './contract/store.ts'
+export type {
+  ChatTextDecoration, ChatTextDecorationActivation, ChatTextDecorationActivationEvent, ChatTextDecorationHandle,
+  ChatTextDecorationId, ChatTextNavigationResult, ChatTextRectangle, ChatTextRevision, ChatTextSelection,
+  ChatTextService, ChatTextSurfaceId,
+} from './contract/text.ts'
 export type { TranscriptViewRowInjected, TranscriptViewRowProps } from './settings/TranscriptViewRow.tsx'
 export type { TranscriptViewMode } from '../chat-settings.ts'
 export type { ChatPresentationPolicy } from './presentation-policy.ts'

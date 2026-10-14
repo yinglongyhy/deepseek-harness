@@ -2146,9 +2146,10 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: '@Remote(\'prompt\') async prompt(request: SessionPromptRequest, signal: AbortSignal): Promise<SessionPromptValue>',
-        description: 'Admit one prompt after explicitly resuming its Session.',
-        parameters: [{ name: 'request', description: 'Session identity, prompt content, source metadata, and delivery mode.' }, { name: 'signal', description: 'caller cancellation before prompt admission begins.' }],
-        returns: 'acknowledgement that the Agent accepted the prompt.',
+        description: 'Admit one prompt or confirm its original admission after explicitly resuming its Session.',
+        parameters: [{ name: 'request', description: 'Session identity, single-use request identity, prompt content, time zone, and delivery mode.' }, { name: 'signal', description: 'caller cancellation before prompt admission begins.' }],
+        returns: 'acknowledgement after Session durability and unchanged ownership are confirmed.',
+        throws: ['RemoteError with `session/prompt-uncertain` when the caller must retain the same request identity and content.'],
       },
       {
         signature: '@Remote(\'attachment\') attachment(request: SessionAttachmentRequest): Promise<SessionAttachmentValue>',

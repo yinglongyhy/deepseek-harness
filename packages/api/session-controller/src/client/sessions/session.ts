@@ -226,7 +226,8 @@ export class Session implements SessionFace {
    * @returns the minted identity for {@link prompt} plus the pre-prompt abandon path.
    */
   beginSubmission(input: BeginSubmissionInput): SubmissionHandle {
-    const requestId = randomUUID() as SessionRequestId
+    const requestId = input.requestId ?? randomUUID() as SessionRequestId
+    if (this.submissionSettlements.has(requestId)) throw new Error('submission echo already registered')
     const placement = this.running ? input.mode === 'steer' ? 'steering' : 'queued' : 'transcript'
     this.pendingSubmissions = [...this.pendingSubmissions, {
       requestId,

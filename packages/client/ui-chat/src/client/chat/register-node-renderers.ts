@@ -2,12 +2,14 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { PerformanceUsageMode } from '../../chat-settings.ts'
 import type { ChatPresentationPolicy } from '../presentation-policy.ts'
+import type { ChatTextInjected } from '../text-host.ts'
 import { NS } from '../locale.ts'
 import { AssistantNodeView } from './AssistantNodeView.tsx'
 import { CommandNodeView, ManualCompactionNodeView } from './CommandNodeView.tsx'
 import {
   CompactionNodeView, ContextMessageNodeView, RetryNodeView, TurnErrorNodeView,
-  TurnMaxTokensNodeView, UnknownNodeView, UserMessageNodeView,
+  TurnMaxTokensNodeView, UnknownNodeView, UserMessageNodeView, UserMessageNodeSlotView,
+  UserMessagePresentationView, PendingUserMessageView, PendingUserMessagePresentationView,
 } from './MessageItem.tsx'
 import { DefaultReasoningBody, ReasoningContent } from './ReasoningContent.tsx'
 import { SystemPromptNodeView } from './SystemPromptRow.tsx'
@@ -22,12 +24,28 @@ import { TurnTriggerNodeView } from './TurnTriggerNodeView.tsx'
  * @param ctx - owning UI Conversation context.
  * @param performanceUsage - live statistics detail preference.
  * @param presentation - live presentation policy.
+ * @param registerText - registers completed Markdown surfaces with the ChatText host.
  */
 export function registerChatNodeRenderers(
   ctx: Context,
   performanceUsage: ObservableSnapshot<PerformanceUsageMode>,
   presentation: ObservableSnapshot<ChatPresentationPolicy>,
+  registerText: ChatTextInjected['registerText'],
 ): void {
+  ctx.effect(() => ctx.slots.registerFactory({
+    name: 'conversation.chat.pending-user-message', scope: 'session', locale: NS,
+  }, PendingUserMessageView))
+  ctx.effect(() => ctx.slots.registerFactory({
+    name: 'conversation.chat.pending-user-message-presentation', scope: 'session',
+    children: { 'conversation.chat.pending-user-presentation': { kind: 'chain', scope: 'session' } },
+  }, PendingUserMessagePresentationView))
+  ctx.effect(() => ctx.slots.registerFactory({
+    name: 'conversation.chat.user-message', scope: 'session', locale: NS,
+  }, UserMessageNodeView))
+  ctx.effect(() => ctx.slots.registerFactory({
+    name: 'conversation.chat.user-message-presentation', scope: 'session',
+    children: { 'conversation.chat.user-presentation': { kind: 'chain', scope: 'session' } },
+  }, UserMessagePresentationView))
   ctx.effect(() => ctx.slots.registerFactory({
     name: 'conversation.chat.reasoning.content',
     scope: 'root',
@@ -38,9 +56,9 @@ export function registerChatNodeRenderers(
     priority: 100,
   }, DefaultReasoningBody))
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register(
-    { name: 'conversation.chat.node', key: 'user', locale: NS }, UserMessageNodeView))
+    { name: 'conversation.chat.node', key: 'user', locale: NS }, UserMessageNodeSlotView))
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register(
-    { name: 'conversation.chat.node', key: 'steering', locale: NS }, UserMessageNodeView))
+    { name: 'conversation.chat.node', key: 'steering', locale: NS }, UserMessageNodeSlotView))
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register(
     { name: 'conversation.chat.node', key: 'context', locale: NS }, ContextMessageNodeView))
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register(
@@ -55,7 +73,7 @@ export function registerChatNodeRenderers(
       'conversation.chat.reasoning.body': { kind: 'single', scope: 'session' },
       'conversation.chat.message.images': { kind: 'single', scope: 'session' },
     },
-    inject: () => ({ hooks: { presentation } }),
+    inject: () => ({ hooks: { presentation }, registerText }),
   }, AssistantNodeView))
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
     name: 'conversation.chat.node',

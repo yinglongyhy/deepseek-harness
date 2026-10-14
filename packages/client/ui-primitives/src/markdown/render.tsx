@@ -637,7 +637,7 @@ function MarkdownImage({ destination, alt, pathImages, streaming, inLink }: {
   const { fileImages } = useMarkdownDelegate()
   const file = streaming ? undefined : parseFileLink(destination)
   const src = (file === undefined ? undefined : fileImages?.resolve(file.path)) ?? imageSource(destination, pathImages)
-  if (src === undefined) return <span className={css.imageAlt}>{alt}</span>
+  if (src === undefined) return <span className={css.imageAlt} data-markdown-excluded="">{alt}</span>
   return <LoadedMarkdownImage key={src} src={src} alt={alt} destination={destination} preview={inLink ? undefined : fileImages} />
 }
 
@@ -650,7 +650,7 @@ function LoadedMarkdownImage({ src, alt, destination, preview }: {
   const [failed, setFailed] = useState(false)
   const [open, setOpen] = useState(false)
   const close = useCallback(() => { setOpen(false) }, [])
-  if (failed) return <span className={css.imageAlt}>{preview === undefined ? '' : `${preview.labels.failed} · `}{alt || destination}</span>
+  if (failed) return <span className={css.imageAlt} data-markdown-excluded="">{preview === undefined ? '' : `${preview.labels.failed} · `}{alt || destination}</span>
   const img = <img className={css.image} src={src} alt={alt}
     onError={() => { setFailed(true) }} loading="lazy" decoding="async" referrerPolicy="no-referrer" />
   if (preview === undefined) return img

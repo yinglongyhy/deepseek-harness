@@ -310,17 +310,33 @@ export class SessionCommandController {
   }
 
   /**
-   * Admit one prompt after Agent and attachment validation; the Remote method
-   * has already validated the content and built the durable message source.
+   * Admit a new prompt or query the original admission for a repeated per-Session requestId.
+   * Callers must not reuse an id for new content. A duplicate does not validate payload equality
+   * or resolve expired file receipts; immutable retry content is enforced by the Client.
+   * The Remote method validates the content and builds the durable message source.
    * @param request - Session identity, prompt content, and delivery mode.
-   * @param source - the `user-rpc` source recorded on the accepted message.
-   * @returns acknowledgement that the Agent accepted the prompt.
+   * @param source - caller identity, request identity, and optional time zone recorded on the message.
+   * @returns original admission acknowledgement after durability and ownership confirmation.
+   * @throws RemoteError with `session/prompt-uncertain` when admission may have occurred but cannot be confirmed.
    */
   async prompt(request: SessionPromptRequest, source: MessageSource): Promise<SessionPromptValue> {
     const agent = await this.resolveAgent(request.sessionId)
-    if (hasPromptRequest(agent, request.requestId)) return { accepted: true }
+    const session = agent.session
+    const confirmAdmission = async (): Promise<SessionPromptValue> => {
+      try {
+        if (!await this.ctx.sessions.flush(session)) throw new Error('no Session durability listener')
+        if (this.ctx.agents.get(agent.id) !== agent || this.ctx.sessions.get(session.id) !== session) {
+          throw new Error('prompt admission owner changed during durability flush')
+        }
+      } catch (error) {
+        throw new RemoteError('session/prompt-uncertain', 'prompt admission durability could not be confirmed', { reason: String(error) })
+      }
+      return { accepted: true }
+    }
+    if (hasPromptRequest(agent, request.requestId)) return confirmAdmission()
     const hasImage = request.content.some(part => part.type === 'image')
     const admit = async (): Promise<SessionPromptValue> => {
+      let admissionStarted = false
       try {
         if (hasImage) {
           const current = this.agents.selectionFor(agent).current
@@ -346,18 +362,25 @@ export class SessionCommandController {
             { sessionId: agent.id },
           )
         }
-        using binding = this.ctx.fileUploads.bindPrompt(agent, admission.receiptIds, request.requestId)
-        if (request.mode === 'steer') agent.steer(message)
-        else agent.followup(message)
-        binding.commit()
+        // Recheck after attachment admission; no await separates this test from enqueue.
+        if (!hasPromptRequest(agent, request.requestId)) {
+          admissionStarted = true
+          using binding = this.ctx.fileUploads.bindPrompt(agent, admission.receiptIds, request.requestId)
+          if (request.mode === 'steer') agent.steer(message)
+          else agent.followup(message)
+          binding.commit()
+        }
       } catch (error) {
+        if (admissionStarted) {
+          throw new RemoteError('session/prompt-uncertain', 'prompt admission could not be confirmed', { reason: String(error) })
+        }
         if (remoteErrorOf(error) !== undefined) throw error
         if (error instanceof AttachmentError) {
           throw new RemoteError('session/attachment-invalid', error.message, { reason: error.code })
         }
         throw new RemoteError('session/agent-busy', 'prompt rejected', { reason: String(error) })
       }
-      return { accepted: true }
+      return confirmAdmission()
     }
     return hasImage ? this.agents.serializeImageAdmission(agent, admit) : admit()
   }
@@ -586,12 +609,12 @@ function hasPromptRequest(agent: Agent, requestId: SessionRequestId): boolean {
     const source = message.source
     return source.kind === 'user' && 'rpcId' in source && source.rpcId === requestId
   }
-  if (agent.inbox.nextTurn.some(matches) || agent.inbox.nextStep.some(matches)) return true
-  // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
-  return agent.session.snapshotEvents().some((event) => {
-    if (event.type !== 'user/message') return false
-    const source = event.data.source
-    return source.kind === 'user' && 'rpcId' in source && source.rpcId === requestId
+  // Inherited inbox occurrences belong to the ancestor, not this admission owner.
+  // oxlint-disable-next-line typescript/no-deprecated -- Owned durable admission receipts include removed inbox occurrences.
+  return agent.session.snapshotEvents(agent.session.inheritedEventCount).some((event) => {
+    if (event.type === 'agent/inbox/spliced') return event.data.inserted.some(matches)
+    if (event.type === 'user/message') return matches(event.data)
+    return false
   })
 }
 function imageBlockIn(
