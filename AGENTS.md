@@ -122,6 +122,7 @@ Before pushing, follow [dsh-pre-push-checks](.agents/skills/dsh-pre-push-checks/
 
 ## Git 提交
 
+- 自定义维护以 [自定义清单](CUSTOMIZATIONS.md) 为事实依据；上游同步使用仅限用户显式调用的 [custom-sync-upstream](.agents/skills/custom-sync-upstream/SKILL.md)，执行 rebase 前必须展示预览并获得确认。
 - 仅在用户明确授权时暂存或提交；请求撰写提交说明不代表授权执行提交。
 - 提交信息统一使用 Conventional Commits：英文类型前缀、可选英文 scope、简洁中文标题。标题使用动词短语描述实际变化，避免模糊总结和开发过程叙述。
 - 正文以中文为主，保留必要的英文标识符、路径与命令。简单修改可省略正文；复杂修改说明动机、关键行为或兼容性影响，以及必要的验证情况，不复制完整日志或罗列修改文件。
