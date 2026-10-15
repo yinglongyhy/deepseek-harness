@@ -113,7 +113,7 @@ export interface SessionEventWindow {
   readonly change: SessionEventChange
 }
 
-/** Conversation-facing event source exposed by one Session binding. */
+/** Session-owned event source; lifecycle observers consume append deltas, not historical windows. */
 export type SessionEventSource = ObservableSnapshot<SessionEventWindow>
 
 /** Session-owned event feed; every accepted window mutation publishes synchronously. */

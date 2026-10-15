@@ -37,6 +37,12 @@
 - **入口与依赖**：[Desktop 主进程](apps/desktop/src/main.ts)、[菜单预期输出](apps/desktop/tests/expected/restart-menu/darwin-packaged-zh-CN.txt)、[启动测试](apps/desktop/tests/main-startup.spec.ts)。依赖菜单构建、退出确认、Host teardown 和 relaunch。
 - **调整条件**：官方开放等价正式版入口时移除重复修改；官方变更退出或重启顺序时先确认，并同时复查显示器记录的 flush。
 
+### 人工介入系统通知
+
+- **差异与目的**：[通知插件](packages/client/interaction-notifications/README.zh.md)为 Web/Desktop 默认提供后台审批、问题、计划审核和已完成任务提醒；固定文案不含用户内容，点击打开所属会话，不代替用户授权。通用设置提供本地总开关。
+- **入口与依赖**：复用 [Session 交互登记](packages/client/ui-session/src/client/index.ts)、Host 的 Session projection 和会话导航；[Desktop 原生桥接](apps/desktop/src/interaction-notifications.ts)只接受令牌、类别和语言。待处理人工交互仍仅使用当前 Client 登记；任务完成使用 Host 实时投影，离线漏报不补发。通知只在整个应用处于后台时显示；正式签名包的 OS 横幅尚未实机验收。关注请求身份、投影更新、后台任务登记与结算、子代理运行及结果投递状态、导航、通知权限和窗口恢复变化。
+- **调整条件**：官方提供同等通知时优先复用。Host 实时投影仅用于任务完成，不扩大为人工交互的全局通知；离线补发、关闭网页后的推送和跨刷新去重不在当前范围。避免按工具调用身份去重而漏掉同次调用的新审批。
+
 ### 主窗口显示器记忆
 
 - **差异与目的**：新启动时仅记忆显示器，在完整布局匹配时以默认大小居中；不恢复窗口几何、最大化或全屏状态。行为由 [Desktop 窗口说明](apps/desktop/README.zh.md#关闭窗口与退出) 拥有。

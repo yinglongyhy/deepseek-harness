@@ -25,7 +25,7 @@ import { Notifier } from './notifier.ts'
 import { ProjectionValueStore } from './projection-store.ts'
 import { Session } from './session.ts'
 import type { SessionRemotes } from './remotes.ts'
-import type { SessionTarget } from '../contract/sessions.ts'
+import type { SessionProjectionUpdate, SessionTarget } from '../contract/sessions.ts'
 
 function sessionSeqCursor(value: number): SessionSeqCursor {
   return value === -1 ? -1 : SessionSeq(value)
@@ -83,6 +83,7 @@ type SessionListMutation =
 /** Instance cluster + frame entry + the session list. */
 export class SessionManager {
   private readonly sessions = new Map<SessionId, Session>()
+  private readonly projectionListeners = new Set<(update: SessionProjectionUpdate) => void>()
   /** In-flight Session disposals remain here after instances leave `sessions`, so manager disposal can await quiescence. */
   private readonly sessionDisposals = new Set<Promise<void>>()
   /**
@@ -206,6 +207,7 @@ export class SessionManager {
     this.listMutations = null
     this.listInflight = null
     this.engagedSessions.clear()
+    this.projectionListeners.clear()
     const reads = [...this.projectionInflight.values()]
     for (const { controller } of reads) controller.abort()
     this.projectionInflight.clear()
@@ -635,6 +637,16 @@ export class SessionManager {
     return this.projectionStores.get(sessionId)?.values()
   }
 
+  /**
+   * Subscribe to live projection replacement frames without retaining a Session.
+   * @param listener - synchronous observer of one control-stream frame.
+   * @returns a disposer that removes the listener.
+   */
+  subscribeProjectionUpdate(listener: (update: SessionProjectionUpdate) => void): () => void {
+    this.projectionListeners.add(listener)
+    return () => { this.projectionListeners.delete(listener) }
+  }
+
   // ---- Live control and Host-event sinks ----
 
   /**
@@ -648,6 +660,20 @@ export class SessionManager {
     }
     this.projectionStore(frame.sessionId).apply(frame.key, frame.value, SessionSeq(frame.seq))
     this.notifier.markDirty()
+    const update: SessionProjectionUpdate = {
+      sessionId: frame.sessionId,
+      key: frame.key,
+      value: frame.value,
+      seq: SessionSeq(frame.seq),
+    }
+    for (const listener of [...this.projectionListeners]) {
+      if (!this.projectionListeners.has(listener)) continue
+      try {
+        listener(update)
+      } catch (error: unknown) {
+        console.error('[session-controller] projection listener failed:', error)
+      }
+    }
   }
 
   private replaceControlBaseline(baseline: SessionControlBaseline): void {

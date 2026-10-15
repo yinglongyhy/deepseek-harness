@@ -6,7 +6,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { SessionId, SessionSeq } from '@deepseek-ai/dsh-session/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { AgentContext } from '../scope.ts'
@@ -45,10 +45,25 @@ export interface SessionRetainInfo {
   readonly retainedBy: Readonly<Partial<Record<SessionReferenceSource, number>>>
 }
 
+/** One live replacement delivered by the Session control stream. */
+export interface SessionProjectionUpdate {
+  readonly sessionId: SessionId
+  readonly key: string
+  readonly value: unknown
+  readonly seq: SessionSeq
+}
+
 /** The sessions-service face injected as `ctx.sessions`. */
 export interface ISessions {
   /** Host catalog and local reference-source counts; navigation belongs to view owners. */
   readonly list: ObservableSnapshot<SessionListState>
+  /**
+   * Observe live replacement frames from the global control stream.
+   * The subscription does not replay baselines or cached values, or retain a Session.
+   * @param listener - callback for each live projection frame. Exceptions are contained per listener.
+   * @returns a disposer that removes the listener.
+   */
+  onProjectionUpdate(listener: (update: SessionProjectionUpdate) => void): () => void
   /**
    * Retain an exact Client generation and start its shared initial history opening.
    * @param target - known identity or durable direct-parent address.

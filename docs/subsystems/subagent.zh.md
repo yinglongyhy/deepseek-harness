@@ -447,6 +447,17 @@ startActivation(spec: SubagentActivationSpec & { readonly childId: SessionId }):
 startActivation(spec: SubagentActivationSpec): Promise<SubagentActivation>
 
 /**
+ * Read whether this exact parent owns admitted descendant preparation or an
+ * unsettled activation, including idle, parked, and closing children. Ownership
+ * ends only after cleanup and parent result delivery; forks own no source work.
+ * A manager-less composition returns false. This is a synchronous runtime read,
+ * not persisted state and not a wait.
+ * @param parent - exact live parent whose owned descendants are inspected.
+ * @returns whether descendant work remains owned.
+ */
+hasPendingChildren(parent: Agent): boolean
+
+/**
  * Join progressing descendants without cancelling them. Idle descendants whose
  * inboxes require a later wake stay resident and do not delay host completion.
  * @param parent - the exact parent whose descendant work is observed.

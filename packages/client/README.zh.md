@@ -33,6 +33,7 @@ kind: "package-group"
 | [`shortcuts/`](shortcuts/README.zh.md) | 注册应用键盘命令 | `ctx.shortcuts` |
 | [`ui-shortcuts/`](ui-shortcuts/README.zh.md) | 展示快捷键速查 | — |
 | [`store/`](store/README.zh.md) | 提供不依赖 React 的 observable 与快照存储原语 | — |
+| [`interaction-notifications/`](interaction-notifications/README.zh.md) | 为待处理的人工交互发送后台系统提醒 | — |
 | [`hmr/`](hmr/README.zh.md) | 在开发期间刷新客户端插件 | — |
 | [`locale/`](locale/README.zh.md) | 提供本地化偏好与消息词典 | `ctx.locale` |
 | [`test-runtime/`](../test-support/client-runtime/README.zh.md) | 为客户端功能包提供共享的仓库测试支持 | — |

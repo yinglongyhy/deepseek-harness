@@ -28,6 +28,10 @@
     // not declaration path aliases, keep each package/vendor source compiled
     // under its own tsconfig boundary.
     "paths": {
+      "@deepseek-ai/dsh-client-interaction-notifications": ["./packages/client/interaction-notifications/src/index.ts"],
+      "@deepseek-ai/dsh-client-interaction-notifications/client": ["./packages/client/interaction-notifications/src/client/index.ts"],
+      "@deepseek-ai/dsh-client-interaction-notifications/types": ["./packages/client/interaction-notifications/src/types.ts"],
+      "@deepseek-ai/dsh-client-interaction-notifications/src/*": ["./packages/client/interaction-notifications/src/*"],
       "@deepseek-ai/dsh-llm-codex-account": ["./packages/llm/llm-codex-account/src/index.ts"],
       "@deepseek-ai/dsh-llm-codex-account/client": ["./packages/llm/llm-codex-account/src/client/index.ts"],
       "@deepseek-ai/dsh-llm-codex-account/src/*": ["./packages/llm/llm-codex-account/src/*"],

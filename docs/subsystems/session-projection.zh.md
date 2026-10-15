@@ -56,6 +56,16 @@ interface ProjectionDefinition<
      * @returns the whole current value for this unit's key.
      */
     view(state: NoInfer<S>): SessionProjectionMap[K]
+    /**
+     * Optional live change-feed eligibility. Omission publishes every changed view.
+     * Runs synchronously only for a committed-event drive, never during reads,
+     * replay, or checkpoint restoration. A false result drops this edge without
+     * delaying it or changing the pure fold, cached view, or watermark.
+     * @param session - live Session receiving the committed event.
+     * @param event - committed event causing the changed view.
+     * @returns whether change-feed listeners receive this edge.
+     */
+    publish?(session: Session, event: SessionEvent): boolean
   } : never
   /**
    * Persisted-cache invalidation version: bump whenever the serialized state fields or the
@@ -100,6 +110,8 @@ type ProjectionChangeListener = (
 ```
 
 `snapshot(session)` 完全同步：载体在切出页面切片的同一 tick 内读取它，因此 `asOfSeq` 使两次读取使用同一个序号。它只返回客户端视图，并在返回前通过各单元的 `viewSchema` 校验。`stateOf(session, key)` 可在不计算无关视图的情况下读取一份实时 host 状态；调用方不得修改这一借用引用。state 引用变化时，注册表计算并缓存一次原始 view；只有该结果通过 `Object.is` 判定为变化时才触发变更流，对象 view 若要在仅内部 state 变化时抑制发布就必须保留引用。
+
+可选的 `wire.publish(session, event)` 否决只作用于实时流中的视图变化；快照与回放始终保留纯值及水位。否决会直接丢弃该次变更，不补发。状态同步投影应省略它；仅实时提醒的消费者可在此检查权威运行时所有者。
 
 ## 注册表：`ctx.sessionProjections`
 

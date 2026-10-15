@@ -272,6 +272,9 @@
     - id: ui-session
       name: '@deepseek-ai/dsh-client-ui-session'
 
+    - id: interaction-notifications
+      name: '@deepseek-ai/dsh-client-interaction-notifications'
+
     # Unified resource model: protocol providers behind the useResource hook.
     - id: resources
       name: '@deepseek-ai/dsh-client-resources'

@@ -8,7 +8,7 @@ import type {
   AgentContext, ISessions, ProjectionsFace, SessionBinding, SessionFace, SessionListState,
   SessionEventLikeEntry, SessionLiveEventEntry, SessionSearchResultItem,
   SessionReference, SessionReferenceSource, SessionRetainInfo, SessionRetainOptions,
-  SessionSnapshot, SessionSummary, SessionTarget, SubmissionHandle,
+  SessionSnapshot, SessionSummary, SessionTarget, SubmissionHandle, SessionProjectionUpdate,
 } from '@deepseek-ai/dsh-api-session-controller/client'
 import { scopeIdentityOf } from '@deepseek-ai/dsh-api-session-controller/src/client/scope.ts'
 import type { SessionRequestId } from '@deepseek-ai/dsh-api-session-controller/types'
@@ -308,6 +308,7 @@ export class TestSessions implements ISessions {
   private readonly retentionStores = new Map<SessionId, SnapshotStore<SessionRetainInfo>>()
   private readonly pendingDrops = new Set<Promise<void>>()
   private closed = false
+  private readonly projectionListeners = new Set<(update: SessionProjectionUpdate) => void>()
 
   /** Calls observed on the service-level face, newest last. */
   readonly calls: {
@@ -332,6 +333,7 @@ export class TestSessions implements ISessions {
     })
     rootCtx.effect(() => async () => {
       this.closed = true
+      this.projectionListeners.clear()
       for (const [id, generation] of this.generations) {
         generation.live = false
         generation.retention = EMPTY_RETAIN_INFO
@@ -341,6 +343,27 @@ export class TestSessions implements ISessions {
       this.generations.clear()
       await this.drainDrops()
     }, 'test sessions: Client generations')
+  }
+
+  /**
+   * Subscribe to test-driven global projection frames without retaining a Session.
+   * @param listener - observer of explicitly emitted live updates.
+   * @returns observer disposer.
+   */
+  onProjectionUpdate(listener: (update: SessionProjectionUpdate) => void): () => void {
+    this.projectionListeners.add(listener)
+    return () => { this.projectionListeners.delete(listener) }
+  }
+
+  /**
+   * Deliver one live projection fixture through mounted feature observers.
+   * @param update - explicit global control-frame payload.
+   * @returns completion of the runtime's act-wrapped publication.
+   */
+  async emitProjectionUpdate(update: SessionProjectionUpdate): Promise<void> {
+    await this.stabilize(() => {
+      for (const listener of this.projectionListeners) listener(update)
+    })
   }
 
   /**

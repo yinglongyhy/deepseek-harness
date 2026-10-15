@@ -56,6 +56,16 @@ interface ProjectionDefinition<
      * @returns the whole current value for this unit's key.
      */
     view(state: NoInfer<S>): SessionProjectionMap[K]
+    /**
+     * Optional live change-feed eligibility. Omission publishes every changed view.
+     * Runs synchronously only for a committed-event drive, never during reads,
+     * replay, or checkpoint restoration. A false result drops this edge without
+     * delaying it or changing the pure fold, cached view, or watermark.
+     * @param session - live Session receiving the committed event.
+     * @param event - committed event causing the changed view.
+     * @returns whether change-feed listeners receive this edge.
+     */
+    publish?(session: Session, event: SessionEvent): boolean
   } : never
   /**
    * Persisted-cache invalidation version: bump whenever the serialized state fields or the
@@ -100,6 +110,8 @@ type ProjectionChangeListener = (
 ```
 
 `snapshot(session)` is fully synchronous: a carrier reads it in the same tick as its page slice, so `asOfSeq` covers both reads at one sequence number. It returns only client views, and every value passes its unit's `viewSchema` before return. `stateOf(session, key)` reads one live host state without computing unrelated views; callers must not mutate the borrowed reference. A state-reference change computes one cached raw view, and the change feed fires only when that result changes by `Object.is`; an object-valued view must preserve its reference to suppress publication across internal-only state changes.
+
+An optional `wire.publish(session, event)` veto applies only to changed-view edges on the live feed; snapshots and replay always retain the pure value and watermark. A veto drops an edge without catch-up. State-synchronization projections omit it; live-only reminder consumers may inspect authoritative runtime owners there.
 
 ## The registry: `ctx.sessionProjections`
 

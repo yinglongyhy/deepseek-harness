@@ -57,6 +57,7 @@
     }
   },
   "dependencies": {
+    "@deepseek-ai/dsh-client-interaction-notifications": "workspace:*",
     "@deepseek-ai/dsh-llm-codex-account": "workspace:*",
     "@deepseek-ai/dsh-agent-instructions": "workspace:*",
     "@deepseek-ai/dsh-agent-preset": "workspace:*",

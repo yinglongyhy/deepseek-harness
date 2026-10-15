@@ -1,0 +1,38 @@
+/** Locale-owned system copy and General Settings feedback. */
+export const en = {
+  title: 'System notifications',
+  description: 'Notify when a task finishes or needs your input while this window is in the background. Saved for this browser or device.',
+  permission: 'Allow notifications',
+  loading: 'Checking notification availability…',
+  default: 'Allow notifications in this browser to receive background reminders',
+  denied: 'Notifications are blocked. Allow them in your browser or system settings, then return here',
+  unsupported: 'System notifications are unavailable here. Use the application to check pending requests',
+  granted: 'System permissions and focus modes may suppress reminders',
+  failure: 'A notification could not be sent or opened. Check pending requests in the application and retry notification access',
+  retry: 'Check notification access',
+  notificationTitle: 'DeepSeek Harness needs your attention',
+  approval: 'An operation needs approval. Click to open the conversation.',
+  question: 'A question needs an answer. Click to open the conversation.',
+  'plan-review': 'A plan needs review. Click to open the conversation.',
+  completionTitle: 'DeepSeek Harness · Task completed',
+  'task-completed': 'Your task has finished. Click to open the conversation.',
+} as const
+/** Chinese system copy and settings feedback, with the English key set. */
+export const zh: Record<keyof typeof en, string> = {
+  title: '系统通知',
+  description: '窗口在后台时，提醒你任务已完成或需要处理审批、问题和计划审核。设置保存在当前浏览器或设备',
+  permission: '允许通知',
+  loading: '正在检查通知是否可用…',
+  default: '请允许此浏览器发送通知，以接收后台提醒',
+  denied: '通知已被阻止，请在浏览器或系统设置中允许通知后返回此处',
+  unsupported: '当前环境不支持系统通知，请在应用内查看待处理事项',
+  granted: '系统权限和勿扰模式可能阻止提醒显示',
+  failure: '通知未能发送或打开，请在应用内查看待处理事项，并重新检查通知权限',
+  retry: '检查通知权限',
+  notificationTitle: 'DeepSeek Harness 需要你处理',
+  approval: '有操作等待授权，点击打开对应会话',
+  question: '有问题等待回答，点击打开对应会话',
+  'plan-review': '有计划等待审核，点击打开对应会话',
+  completionTitle: 'DeepSeek Harness · 任务已完成',
+  'task-completed': '任务已完成，点击打开对应会话',
+}

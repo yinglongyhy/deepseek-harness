@@ -245,6 +245,16 @@ export class SubagentManager {
   }
 
   /**
+   * Read admitted descendant preparation and unsettled activation ownership.
+   * @param parent - exact live parent whose descendants are inspected.
+   * @returns whether preparation, execution, or settlement remains owned.
+   */
+  hasPendingChildren(parent: Agent): boolean {
+    return [...this.materializations].some(item => item.lineage.includes(parent))
+      || [...this.resident.values()].some(item => activationAgent(item) !== parent && item.ancestry.has(parent))
+  }
+
+  /**
    * Join progressing child work, leaving idle parked inboxes resident.
    * @param parent - exact live parent whose descendants are observed.
    * @returns whether work was joined and the host must recheck parent completion.

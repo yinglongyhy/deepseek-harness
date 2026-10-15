@@ -48,6 +48,8 @@ Desktop Host Platform API requests and update-policy requests identify the insta
 
 A server-expired account credential returns to Welcome when no official API key is configured; an available API key keeps the workspace open. Explicit sign-out follows the same rule. Both Welcome and the workspace display the localized expiry notice.
 
+The [interaction notification plugin](../../packages/client/interaction-notifications/README.md) owns notification behavior and completion projection semantics. Desktop displays fixed, silent native notifications while the whole application is in the background and navigates to the owning Session when a notification is clicked. Renderer navigation, window destruction, and quit release native notices.
+
 Desktop microphone access is restricted to audio requests from the primary `dsh-app://app` frame. macOS uses system microphone authorization, a packaged usage description, and `com.apple.security.device.audio-input` in the main application and Helper signatures.
 
 Press F12 (Fn+F12 on media-key keyboards), Command+Option+I on macOS, or Ctrl+Shift+I on Windows to toggle DevTools for the focused application page, including in packaged builds. These native shortcuts use hidden application-menu items. Update overlays and packaged embedded browser guests disable DevTools.

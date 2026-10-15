@@ -161,6 +161,33 @@ function sequenceName(sequence: readonly number[], prefix: string): string {
 }
 
 describe('SessionProjectionRegistry drive', () => {
+  it('drops ineligible live edges without gating reads, replay, restoration, or later changes', async () => {
+    const { ctx, session } = await harness()
+    onTestFinished(() => ctx.fiber.dispose())
+    let eligible = false
+    const publish = vi.fn(() => eligible)
+    const unit = marksUnit()
+    ctx.sessionProjections.register({ ...unit, wire: { ...unit.wire, publish } })
+    const changes = vi.fn()
+    ctx.sessionProjections.onChanged(changes)
+    mark(session, ['blocked'])
+    expect(changes).not.toHaveBeenCalled()
+    expect(publish).toHaveBeenCalledTimes(1)
+    const snapshot = ctx.sessionProjections.snapshot(session)
+    const checkpoint = ctx.sessionProjections.checkpoint(session)
+    expect(snapshot.values['test/marks']).toEqual({ marks: ['blocked'] })
+    expect(ctx.sessionProjections.viewCheckpoint(checkpoint)['test/marks']).toEqual({ marks: ['blocked'] })
+    const events = session.snapshotEvents()
+    expect(ctx.sessionProjections.restore({}, events, SessionLogOffset(0), session.header, SessionLogOffset(0))
+      .snapshot.values['test/marks']).toEqual({ marks: ['blocked'] })
+    expect(publish).toHaveBeenCalledTimes(1)
+    eligible = true
+    session.append('turn/start', { turn: 1 })
+    expect(changes).not.toHaveBeenCalled()
+    const end = mark(session, ['accepted'])
+    expect(changes).toHaveBeenCalledExactlyOnceWith(session, 'test/marks', { marks: ['accepted'] }, end.seq)
+  })
+
   it('supplies the exact inherited cut to live, restored, and hydrated projection initialization', async () => {
     const ctx = new Context()
     await ctx.plugin(SessionStore)

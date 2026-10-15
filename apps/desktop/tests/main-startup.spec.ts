@@ -128,7 +128,8 @@ const harness = await vi.hoisted(async () => {
     isMinimized() { return this.minimized }
     visible = true
     isVisible() { return this.visible }
-    isFocused() { return true }
+    focused = true
+    isFocused() { return this.focused }
     async loadURL(url: string) {
       this.urls.push(url)
       this.webContents.mainFrame.url = url
@@ -198,6 +199,13 @@ const harness = await vi.hoisted(async () => {
   const analytics = vi.fn(async (_event: unknown) => {})
   const nativeTheme = { themeSource: 'system', shouldUseDarkColors: false }
   const trays: FakeTray[] = []
+  const notifications: FakeNotification[] = []
+  class FakeNotification extends EventEmitter {
+    readonly show = vi.fn()
+    readonly close = vi.fn(() => { this.emit('close') })
+    static isSupported = vi.fn(() => true)
+    constructor(readonly options: { title: string; body: string; silent: true }) { super(); notifications.push(this) }
+  }
   class FakeTray extends EventEmitter {
     readonly setToolTip = vi.fn()
     readonly setContextMenu = vi.fn()
@@ -209,7 +217,7 @@ const harness = await vi.hoisted(async () => {
   return {
     failWindow(error: Error) { windowFailure = error },
     windows, hosts, handlers, app, FakeWindow, FakeHost, powerMonitor, nativeTheme, analytics,
-    trays, FakeTray, backgroundNotice, shellDialog,
+    trays, FakeTray, notifications, FakeNotification, backgroundNotice, shellDialog,
     menu, popup, socketHeaders: vi.fn(), loginShell, readLoginShell, updateCheck, updateDownload, updateInstall,
     platformDispose,
     platformCloseAndWait,
@@ -256,7 +264,8 @@ const harness = await vi.hoisted(async () => {
     reset() {
       accountListener = undefined
       windows.length = 0; hosts.length = 0; handlers.clear(); app.removeAllListeners()
-      trays.length = 0
+      trays.length = 0; notifications.length = 0
+      FakeNotification.isSupported.mockReturnValue(true)
       backgroundNotice.markerPath = undefined
       shellDialog.isOpen = false
       powerMonitor.removeAllListeners()
@@ -314,6 +323,7 @@ vi.mock('electron', () => ({
   protocol: { registerSchemesAsPrivileged: vi.fn(), handle: harness.protocolHandle },
   powerMonitor: harness.powerMonitor,
   Tray: harness.FakeTray,
+  Notification: harness.FakeNotification,
   nativeImage: { createFromPath: (path: string) => ({ path }) },
 }))
 vi.mock('../src/background-notice.ts', () => ({ DesktopBackgroundNotice: class {
@@ -2559,4 +2569,38 @@ it('disables native product events for a disabled Desktop launch', async () => {
   await harness.navigated.promise
   expect(harness.analytics).not.toHaveBeenCalled()
   harness.analyticsEnabled = true
+})
+
+it('validates notification IPC and focuses only after a native click', async () => {
+  await import('../src/main.ts')
+  await harness.preparing.promise
+  harness.prepared.resolve()
+  await harness.hostStarted.promise
+  harness.hosts[0]!.ready.resolve()
+  await harness.navigated.promise
+  await vi.advanceTimersByTimeAsync(0)
+  const window = harness.windows[0]!
+  window.visible = false
+  window.focused = false
+  const request = { id: 'opaque-token', kind: 'approval', locale: 'en' }
+  expect(await invoke(DESKTOP_IPC.interactionNotificationStatus, 'app')).toBe('available')
+  expect(await invoke(DESKTOP_IPC.interactionNotificationShow, 'app', request)).toBe('shown')
+  expect(harness.notifications[0]?.options).toEqual({ title: 'DeepSeek Harness · Action needed', body: 'An action is waiting for your approval.', silent: true })
+  expect(window.focus).not.toHaveBeenCalled()
+  expect(() => invoke(DESKTOP_IPC.interactionNotificationShow, 'shell', request)).toThrow('rejected IPC')
+  expect(() => invoke(DESKTOP_IPC.interactionNotificationShow, 'app', { ...request, kind: 'unknown' }))
+    .toThrow('invalid interaction notification request')
+  harness.notifications[0]!.emit('click')
+  expect(window.focus).toHaveBeenCalledOnce()
+  expect(window.webContents.send).toHaveBeenCalledWith(DESKTOP_IPC.interactionNotificationEvent, { kind: 'click', id: request.id })
+  await invoke(DESKTOP_IPC.interactionNotificationClose, 'app', request.id)
+  expect(harness.notifications[0]?.close).toHaveBeenCalledOnce()
+  expect(await invoke(DESKTOP_IPC.interactionNotificationShow, 'app', { ...request, id: 'reload-token' })).toBe('shown')
+  window.webContents.emit('did-start-navigation', {}, 'dsh-app://app/', false, true)
+  expect(harness.notifications[1]?.close).toHaveBeenCalledOnce()
+  harness.notifications[1]?.emit('click')
+  expect(window.webContents.send).not.toHaveBeenCalledWith(DESKTOP_IPC.interactionNotificationEvent, { kind: 'click', id: 'reload-token' })
+  expect(await invoke(DESKTOP_IPC.interactionNotificationShow, 'app', { ...request, id: 'quit-token' })).toBe('shown')
+  harness.app.emit('will-quit')
+  expect(harness.notifications[2]?.close).toHaveBeenCalledOnce()
 })

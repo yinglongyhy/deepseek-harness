@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { installMandatoryUpdateOverlay } from '../src/preload-mandatory-overlay.ts'
 import { syncWindowsAppearance } from '../src/preload-windows.ts'
 import { DESKTOP_IPC, type DshDesktopProductApi } from '../src/ipc.ts'
+import type { NotificationToken } from '@deepseek-ai/dsh-client-interaction-notifications/types'
 
 const electron = vi.hoisted(() => ({
   contextBridge: { exposeInMainWorld: vi.fn() },
@@ -43,7 +44,14 @@ it('limits product documents to update status and a native confirmation action',
   const api = electron.contextBridge.exposeInMainWorld.mock.calls.find(([name]) => name === 'dshDesktop')?.[1] as DshDesktopProductApi
   await api.updates.status()
   await api.updates.open()
-  expect(electron.ipcRenderer.invoke.mock.calls).toEqual([[DESKTOP_IPC.updatesStatus], [DESKTOP_IPC.updatesOpen]])
+  const request = { id: 'opaque-token' as NotificationToken, kind: 'approval' as const, locale: 'en' as const }
+  await api.notifications.status()
+  await api.notifications.show(request)
+  await api.notifications.close(request.id)
+  expect(electron.ipcRenderer.invoke.mock.calls).toEqual([
+    [DESKTOP_IPC.updatesStatus], [DESKTOP_IPC.updatesOpen], [DESKTOP_IPC.interactionNotificationStatus],
+    [DESKTOP_IPC.interactionNotificationShow, request], [DESKTOP_IPC.interactionNotificationClose, request.id],
+  ])
   expect(api).not.toHaveProperty('plugins')
   expect(api).not.toHaveProperty('backend')
   expect(api.updates).not.toHaveProperty('install')
@@ -55,6 +63,15 @@ it('limits product documents to update status and a native confirmation action',
   expect(listener).toHaveBeenCalledWith({ visible: false })
   dispose()
   expect(electron.ipcRenderer.off).toHaveBeenCalledWith(DESKTOP_IPC.updatesPresentation, handler)
+  const notificationListener = vi.fn()
+  const disposeNotification = api.notifications.subscribe(notificationListener)
+  const notificationHandler = electron.ipcRenderer.on.mock.calls
+    .find(([channel]) => channel === DESKTOP_IPC.interactionNotificationEvent)?.[1] as
+      (event: unknown, value: { kind: 'click' | 'failed'; id: NotificationToken }) => void
+  notificationHandler({}, { kind: 'click', id: request.id })
+  expect(notificationListener).toHaveBeenCalledExactlyOnceWith({ kind: 'click', id: request.id })
+  disposeNotification()
+  expect(electron.ipcRenderer.off).toHaveBeenCalledWith(DESKTOP_IPC.interactionNotificationEvent, notificationHandler)
 })
 
 it.each(['dsh-app://shell/plugin-manager.html', 'dsh-app://other/index.html', 'https://shell/startup.html', 'http://example.com/'])('exposes only the carrier marker to %s', async (url) => {

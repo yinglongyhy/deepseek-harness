@@ -82,6 +82,16 @@ export interface ProjectionDefinition<
      * @returns the whole current value for this unit's key.
      */
     view(state: NoInfer<S>): SessionProjectionMap[K]
+    /**
+     * Optional live change-feed eligibility. Omission publishes every changed view.
+     * Runs synchronously only for a committed-event drive, never during reads,
+     * replay, or checkpoint restoration. A false result drops this edge without
+     * delaying it or changing the pure fold, cached view, or watermark.
+     * @param session - live Session receiving the committed event.
+     * @param event - committed event causing the changed view.
+     * @returns whether change-feed listeners receive this edge.
+     */
+    publish?(session: Session, event: SessionEvent): boolean
   } : never
   /**
    * Persisted-cache invalidation version: bump whenever the serialized state fields or the
@@ -142,7 +152,11 @@ interface ErasedDefinition {
   stateSchema: { parse(value: unknown): unknown }
   init(header: SessionHeader, inheritedEventCount: SessionLogOffset): unknown
   apply(state: unknown, event: SessionEvent): unknown
-  wire: { viewSchema: { parse(value: unknown): unknown }; view(state: unknown): unknown } | undefined
+  wire: {
+    viewSchema: { parse(value: unknown): unknown }
+    view(state: unknown): unknown
+    publish?: ((session: Session, event: SessionEvent) => boolean) | undefined
+  } | undefined
   stateVersion: number
 }
 
@@ -256,6 +270,7 @@ export class SessionProjectionRegistry extends Service {
     const wire = definition.wire as {
       viewSchema: ZodType
       view(state: S): unknown
+      publish?: (session: Session, event: SessionEvent) => boolean
     } | undefined
     const erased: ErasedDefinition = {
       key: definition.key,
@@ -264,7 +279,7 @@ export class SessionProjectionRegistry extends Service {
       apply: (state, event) => definition.apply(state as S, event),
       wire: wire === undefined
         ? undefined
-        : { viewSchema: wire.viewSchema, view: state => wire.view(state as S) },
+        : { viewSchema: wire.viewSchema, view: state => wire.view(state as S), publish: wire.publish },
       stateVersion: definition.stateVersion,
     }
     if (!Number.isSafeInteger(definition.stateVersion) || definition.stateVersion < 0) {
@@ -689,7 +704,7 @@ export class SessionProjectionRegistry extends Service {
         views[0] = views[1]
         if (this.listeners.size > 0) {
           views[1] = wire.view(next)
-          if (!Object.is(views[0], views[1])) {
+          if (!Object.is(views[0], views[1]) && (wire.publish === undefined || wire.publish(session, event))) {
             const value = wire.viewSchema.parse(views[1])
             for (const listener of this.listeners) {
               listener(session, registration.def.key as Extract<keyof SessionProjectionMap, string>, value, event.seq)

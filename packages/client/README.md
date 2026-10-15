@@ -33,6 +33,7 @@ The kernel packages boot and serve the page; the UI feature packages present it.
 | [`shortcuts/`](shortcuts/README.md) | Registers application keyboard commands | `ctx.shortcuts` |
 | [`ui-shortcuts/`](ui-shortcuts/README.md) | Presents the keyboard shortcut reference | — |
 | [`store/`](store/README.md) | Provides React-free observable and snapshot-store primitives | — |
+| [`interaction-notifications/`](interaction-notifications/README.md) | Sends background system reminders for pending human interactions | — |
 | [`hmr/`](hmr/README.md) | Refreshes client plugins during development | — |
 | [`locale/`](locale/README.md) | Provides localization preferences and message dictionaries | `ctx.locale` |
 | [`test-runtime/`](../test-support/client-runtime/README.md) | Shared repository test support for client feature packages | — |

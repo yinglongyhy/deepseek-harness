@@ -82,6 +82,7 @@ function fakeSessions(ctx: Context): { sessions: ISessions; binding: SessionBind
   }
   const sessions: ISessions = {
     list,
+    onProjectionUpdate: () => { throw new Error('unused fake Sessions operation') },
     searchResultLimit: 50,
     create: () => Promise.reject(new Error('unused fake Sessions operation')),
     retain: () => reference,

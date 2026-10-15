@@ -1,0 +1,11 @@
+version: 1
+scenario: interaction-notifications
+profile: web
+composition: web-default
+recording: authored
+header:
+  class: web-default
+session:
+  source: ../approval-composer/session.v3.jsonl
+workspace:
+  final: true

@@ -682,6 +682,55 @@ describe('UiSession pending interactions', () => {
     )
   })
 
+  it('publishes every domain change with stable snapshots and isolated subscribers', async () => {
+    const ctx = new Context()
+    const bench = createSessionsBench(ctx)
+    const service = createUiSession(ctx, bench)
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const firstListener = vi.fn(() => { throw new Error('subscriber failed') })
+    const listener = vi.fn()
+    const unsubscribeFirst = service.pendingInteractions.subscribe(firstListener)
+    const unsubscribe = service.pendingInteractions.subscribe(listener)
+    const registerHigh = service.registerPendingInteraction<SessionPendingInteractionBase>(() => 5)
+    const registerLow = service.registerPendingInteraction<SessionPendingInteractionBase>(() => 1)
+    const first = { key: 'high:1', kind: 'high', sessionId: sessionId('s1') }
+    const low = { key: 'low:1', kind: 'low', sessionId: sessionId('s1') }
+    const delegate = () => Promise.resolve()
+    const initial = service.pendingInteractions.getSnapshot()
+    expect(initial).toEqual([])
+
+    const removeHigh = registerHigh(first, delegate)
+    const highSnapshot = service.pendingInteractions.getSnapshot()
+    expect(highSnapshot).toEqual([first])
+    expect(highSnapshot).not.toBe(initial)
+    expect(service.sessionStatus.getSnapshot().get(first.sessionId)?.pendingInteraction).toBe(first)
+    const callsAfterHigh = listener.mock.calls.length
+
+    const removeLow = registerLow(low, delegate)
+    const withLow = service.pendingInteractions.getSnapshot()
+    expect(withLow).toEqual([first, low])
+    expect(withLow).not.toBe(highSnapshot)
+    expect(listener).toHaveBeenCalledTimes(callsAfterHigh + 1)
+    expect(service.sessionStatus.getSnapshot().get(first.sessionId)?.pendingInteraction).toBe(first)
+
+    removeLow()
+    const withoutLow = service.pendingInteractions.getSnapshot()
+    expect(withoutLow).toEqual([first])
+    expect(withoutLow).not.toBe(withLow)
+    const removeAgain = service.pendingInteractions.subscribe(listener)
+    removeAgain()
+    unsubscribeFirst()
+    removeHigh()
+    expect(service.pendingInteractions.getSnapshot()).toEqual([])
+    expect(errors).toHaveBeenCalledWith('[ui-session] pending interactions subscriber failed:', expect.any(Error))
+    const callCount = listener.mock.calls.length
+    unsubscribe()
+    const afterUnsubscribe = registerHigh({ key: 'high:2', kind: 'high', sessionId: first.sessionId }, delegate)
+    expect(listener).toHaveBeenCalledTimes(callCount)
+    afterUnsubscribe()
+    await ctx.fiber.dispose()
+  })
+
   it('removes active values before awaiting their teardown delegation', async () => {
     const ctx = new Context()
     const bench = createSessionsBench(ctx)
@@ -695,8 +744,12 @@ describe('UiSession pending interactions', () => {
     )
 
     let disposed = false
+    const completeListener = vi.fn()
+    service.pendingInteractions.subscribe(completeListener)
     const disposal = ctx.fiber.dispose().then(() => { disposed = true })
     await vi.waitFor(() => { expect(delegate).toHaveBeenCalledOnce() })
+    expect(service.pendingInteractions.getSnapshot()).toEqual([])
+    expect(completeListener).toHaveBeenCalled()
     expect(service.sessionStatus.getSnapshot()).toEqual(new Map())
     expect(disposed).toBe(false)
     remove()

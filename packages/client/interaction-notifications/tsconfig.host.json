@@ -1,0 +1,24 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "tsBuildInfoFile": "lib/tsconfig.host.tsbuildinfo"
+  },
+  "files": [
+    "src/index.ts",
+    "src/host/projection.ts",
+    "src/types.ts"
+  ],
+  "references": [
+    { "path": "../../core/session" },
+    { "path": "../../core/agent" },
+    { "path": "../../jobs/jobs" },
+    { "path": "../../subagent/subagent" },
+    { "path": "../../session/session-projection" },
+    { "path": "../../../vendor/cordis" },
+    {
+      "path": "../../util/brand"
+    }
+  ]
+}

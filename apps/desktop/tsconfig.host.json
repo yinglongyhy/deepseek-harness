@@ -8,6 +8,7 @@
     "src"
   ],
   "references": [
+    { "path": "../../packages/client/interaction-notifications/tsconfig.host.json" },
     {
       "path": "../../packages/boot/app-boot"
     },

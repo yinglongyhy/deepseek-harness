@@ -78,6 +78,73 @@ async function feedList(b: Bench, rows: FeedRow[]): Promise<void> {
   await Promise.resolve() // manager notifier flush
 }
 
+describe('live projection updates', () => {
+  it('publishes live frames without requiring a Session and excludes baselines and list hints', async ({ bench }) => {
+    const b = bench()
+    const listener = vi.fn()
+    b.svc.onProjectionUpdate(listener)
+
+    b.svc.handleControlFrame({ type: 'baseline', value: { projections: {} } })
+    await feedList(b, [{ id: 's1', projections: { title: 'List hint' } }])
+    expect(listener).not.toHaveBeenCalled()
+    expect(b.svc.binding(sid('s1'))).toBeUndefined()
+
+    b.svc.handleControlFrame({
+      type: 'projection', sessionId: sid('s1'), key: 'title', value: 'Live', seq: 0,
+    })
+    expect(listener).toHaveBeenCalledExactlyOnceWith({
+      sessionId: sid('s1'), key: 'title', value: 'Live', seq: SessionSeq(0),
+    })
+  })
+
+  it('does not publish projection values seeded by a history opening', async ({ bench }) => {
+    const b = bench()
+    b.mock.stream(FOLLOW, followScript(() => ok({
+      records: [], hasMore: false,
+      projections: { asOfSeq: 0, values: { title: 'History baseline' } },
+    })))
+    await feedList(b, [{ id: 's1' }])
+    const listener = vi.fn()
+    b.svc.onProjectionUpdate(listener)
+    using reference = b.svc.retain(sid('s1'), { source: 'controllerOperation' })
+    await reference.ready
+    expect(reference.binding.session.projections.faceOf('title').getSnapshot()).toBe('History baseline')
+    expect(listener).not.toHaveBeenCalled()
+  })
+
+  it('contains listener failures and removes listeners on unsubscribe or disposal', async ({ bench }) => {
+    const b = bench()
+    const report = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const removeBad = b.svc.onProjectionUpdate(() => { throw new Error('listener failure') })
+    const active = vi.fn()
+    const removeActive = b.svc.onProjectionUpdate(active)
+    try {
+      b.svc.handleControlFrame({
+        type: 'projection', sessionId: sid('s1'), key: 'title', value: 'Live', seq: 0,
+      })
+      expect(report).toHaveBeenCalledOnce()
+      expect(active).toHaveBeenCalledOnce()
+
+      removeBad()
+      removeActive()
+      b.svc.handleControlFrame({
+        type: 'projection', sessionId: sid('s1'), key: 'title', value: 'Later', seq: 1,
+      })
+      expect(active).toHaveBeenCalledOnce()
+
+      const afterDispose = vi.fn()
+      b.svc.onProjectionUpdate(afterDispose)
+      await b.ctx.fiber.dispose()
+      b.svc.handleControlFrame({
+        type: 'projection', sessionId: sid('s1'), key: 'title', value: 'Disposed', seq: 2,
+      })
+      expect(afterDispose).not.toHaveBeenCalled()
+    } finally {
+      report.mockRestore()
+    }
+  })
+})
+
 describe('list store projection', () => {
   it('publishes format-status changes and preserves a newer update over an in-flight list', async ({ bench }) => {
     const b = bench()

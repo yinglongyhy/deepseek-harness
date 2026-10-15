@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-10-17-live-projection-notification-eligibility.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-10-17-live-projection-notification-eligibility.md
+/agent-note-live-notification-eligibility-outside-projection-replay:
+  en: 41bf92240be9590f
+  zh: 4ed7ebb51ac64ca5
+/agent-note-live-notification-eligibility-outside-projection-replay/problem:
+  en: c4c16c7d4d9d7b67
+  zh: 3472a05fe78e13fe
+/agent-note-live-notification-eligibility-outside-projection-replay/decision:
+  en: 56ae39d3c57789c6
+  zh: d0c2a8af85563bb8
+/agent-note-live-notification-eligibility-outside-projection-replay/alternatives-considered:
+  en: 5a43bf106c285ccb
+  zh: 9232f6b17e655862
+/agent-note-live-notification-eligibility-outside-projection-replay/consequences:
+  en: ef8b7ca1907fa69c
+  zh: f19574c4c6276e0e

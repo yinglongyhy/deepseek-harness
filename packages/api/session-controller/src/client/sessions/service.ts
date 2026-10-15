@@ -13,7 +13,7 @@ import type { RemoteFailure, RemoteResult } from '@deepseek-ai/dsh-typert-protoc
 import type { SessionEventSource } from '../contract/events.ts'
 import type { SessionFace } from '../contract/session.ts'
 import type {
-  AgentContext, ISessions, SessionReference, SessionRetainInfo, SessionRetainOptions, SessionTarget,
+  AgentContext, ISessions, SessionProjectionUpdate, SessionReference, SessionRetainInfo, SessionRetainOptions, SessionTarget,
 } from '../contract/sessions.ts'
 import type { SessionReferenceSource } from '../index.ts'
 import { createScope, scopeIdentityOf, scopeOf as scopeTagOf } from '../scope.ts'
@@ -102,7 +102,7 @@ export interface SessionBinding {
   readonly sessionId: SessionId
   /** The outward session face only — feature code never sees the concrete class. */
   readonly session: SessionFace
-  /** Contiguous event window reserved for Conversation assembly. */
+  /** Contiguous events for Conversation assembly and append-only lifecycle observation; replacements are not live events. */
   readonly eventSource: SessionEventSource
   readonly ctx: AgentContext
 }
@@ -309,6 +309,10 @@ export class ClientSessions implements ISessions {
     } finally {
       reference.release()
     }
+  }
+
+  onProjectionUpdate(listener: (update: SessionProjectionUpdate) => void): () => void {
+    return this.manager.subscribeProjectionUpdate(listener)
   }
 
   retainInfo(id: SessionId): ObservableSnapshot<SessionRetainInfo> {

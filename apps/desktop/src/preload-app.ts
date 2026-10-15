@@ -1,6 +1,7 @@
 /** Origin-scoped boot, native directory selection, host paths of picked files, and update presentation with native confirmation actions. */
 
 import type { DesktopShortcutInput, ShortcutConfigSnapshot, ShortcutSaveResult } from '@deepseek-ai/dsh-client-shortcuts/protocol'
+import type { DesktopNotificationEvent } from '@deepseek-ai/dsh-client-interaction-notifications/types'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { DESKTOP_IPC, SCHEME, type DshDesktopProductApi, type DesktopUpdatePresentation } from './ipc.ts'
 import { PLATFORM_IPC } from './platform-ipc.ts'
@@ -53,6 +54,16 @@ function createProductApi(): DshDesktopProductApi {
         const handle = (_event: Electron.IpcRendererEvent, state: DesktopUpdatePresentation): void => { listener(state) }
         ipcRenderer.on(DESKTOP_IPC.updatesPresentation, handle)
         return () => { ipcRenderer.off(DESKTOP_IPC.updatesPresentation, handle) }
+      },
+    },
+    notifications: {
+      status: () => ipcRenderer.invoke(DESKTOP_IPC.interactionNotificationStatus) as Promise<'available' | 'unsupported'>,
+      show: request => ipcRenderer.invoke(DESKTOP_IPC.interactionNotificationShow, request) as Promise<'shown' | 'foreground' | 'unsupported' | 'failed'>,
+      close: id => ipcRenderer.invoke(DESKTOP_IPC.interactionNotificationClose, id) as Promise<void>,
+      subscribe(listener) {
+        const handle = (_event: Electron.IpcRendererEvent, event: DesktopNotificationEvent): void => { listener(event) }
+        ipcRenderer.on(DESKTOP_IPC.interactionNotificationEvent, handle)
+        return () => { ipcRenderer.off(DESKTOP_IPC.interactionNotificationEvent, handle) }
       },
     },
   }

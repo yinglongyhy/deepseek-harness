@@ -14,6 +14,7 @@ import {
   Menu,
   powerMonitor,
   nativeImage,
+  Notification,
   nativeTheme,
   net,
   protocol,
@@ -62,6 +63,7 @@ import { DesktopUpdateOverlays } from './update-overlay.ts'
 import { DesktopQuitConfirmation } from './quit-confirmation.ts'
 import { DesktopTray } from './tray.ts'
 import { DesktopBackgroundNotice } from './background-notice.ts'
+import { DesktopInteractionNotifications, isDesktopNotificationRequest, isNotificationToken } from './interaction-notifications.ts'
 import { DesktopDisplayMemory } from './display-memory.ts'
 
 const MAIN_WINDOW_SIZE = { width: 1280, height: 820 }
@@ -431,6 +433,10 @@ async function main(): Promise<void> {
       throw new Error('dsh desktop: rejected IPC from an unowned renderer')
     }
   }
+  const interactionNotifications = new DesktopInteractionNotifications(Notification,
+    () => mainWindow !== undefined && !mainWindow.isDestroyed() && mainWindow.isVisible() && mainWindow.isFocused(),
+    (id) => { focusPrimaryWindow(); mainWindow?.webContents.send(DESKTOP_IPC.interactionNotificationEvent, { kind: 'click', id }) },
+    (id) => { mainWindow?.webContents.send(DESKTOP_IPC.interactionNotificationEvent, { kind: 'failed', id }) })
   let navigation: { window: BrowserWindow; url: string; promise: Promise<void> } | undefined
   const navigateMain = (url: string): Promise<void> => {
     const window = mainWindow
@@ -780,6 +786,20 @@ async function main(): Promise<void> {
     assertProductSender(event)
     return presentDesktopUpdate(updates.state)
   })
+  ipcMain.handle(DESKTOP_IPC.interactionNotificationStatus, (event) => {
+    assertProductSender(event)
+    return interactionNotifications.status()
+  })
+  ipcMain.handle(DESKTOP_IPC.interactionNotificationShow, (event, request: unknown) => {
+    assertProductSender(event)
+    if (!isDesktopNotificationRequest(request)) throw new Error('dsh desktop: invalid interaction notification request')
+    return interactionNotifications.show(request)
+  })
+  ipcMain.handle(DESKTOP_IPC.interactionNotificationClose, (event, id: unknown) => {
+    assertProductSender(event)
+    if (!isNotificationToken(id)) throw new Error('dsh desktop: invalid interaction notification id')
+    interactionNotifications.close(id)
+  })
   ipcMain.handle(DESKTOP_IPC.deviceInfo, (event) => {
     assertProductSender(event)
     return readDeviceInfo()
@@ -1115,7 +1135,12 @@ async function main(): Promise<void> {
       window.on('focus', () => { sessionEnding = false })
       window.on('show', () => { sessionEnding = false })
     }
-    window.on('closed', () => { if (mainWindow === window) mainWindow = undefined })
+    window.on('closed', () => {
+      if (mainWindow === window) { interactionNotifications.dispose(); mainWindow = undefined }
+    })
+    window.webContents.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => {
+      if (isMainFrame) interactionNotifications.dispose()
+    })
     window.webContents.on('console-message', (details) => {
       if (details.level !== 'error') return
       rendererConsole.push(`${details.sourceId}:${String(details.lineNumber)} ${details.message}`)
@@ -1283,6 +1308,7 @@ async function main(): Promise<void> {
       .catch((error: unknown) => { console.error(error) })
       .then(() => displayMemory.flush()).finally(() => { app.quit() })
   }
+  app.on('will-quit', () => { interactionNotifications.dispose() })
   app.on('before-quit', (event) => {
     if (shellInstallerOwnsQuit) {
       shuttingDown = true

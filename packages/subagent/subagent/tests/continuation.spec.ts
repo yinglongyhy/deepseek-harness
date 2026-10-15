@@ -390,10 +390,12 @@ describe('continuable activation capacity', () => {
     const rejected = expect(starting).rejects.toThrow('creation failed')
     try {
       await entered.promise
+      expect(ctx.subagents.hasPendingChildren(parent)).toBe(true)
       await expect(ctx.subagents.startActivation({ ...startSpec(parent), delivery: 'parent' })).rejects.toMatchObject({ code: 'ACTIVATION_LIMIT_REACHED' })
       expect(createSpy).toHaveBeenCalledTimes(1)
       release.resolve(undefined)
       await rejected
+      expect(ctx.subagents.hasPendingChildren(parent)).toBe(false)
       createSpy.mockRestore()
       const replacement = await ctx.subagents.startActivation({ ...startSpec(parent), delivery: 'parent' })
       await waitNoActivation(ctx, replacement.childId)
@@ -2310,6 +2312,7 @@ describe('continuable review regressions', () => {
     turn.resolve(undefined)
     try {
       await cleaning.promise
+      expect(ctx.subagents.hasPendingChildren(parent)).toBe(true)
       expect(observed).not.toHaveBeenCalled()
       expect(ended).not.toHaveBeenCalled()
       expect(followup).not.toHaveBeenCalled()
@@ -2322,6 +2325,7 @@ describe('continuable review regressions', () => {
     expect(ended).toHaveBeenCalledTimes(1)
     expect(followup.mock.calls.length + steer.mock.calls.length).toBe(1)
     expect(managerState(ctx).resident.get(started.childId)).toBeUndefined()
+    expect(ctx.subagents.hasPendingChildren(parent)).toBe(false)
     await expect(waiting).resolves.toBe(true)
   })
 
@@ -2649,6 +2653,7 @@ describe('continuable review regressions', () => {
     const parked = child.inbox.nextStep[0]!
     await passSettlementCheck(ctx, started.childId)
     expect(ctx.agents.get(started.childId) !== undefined).toBe(true)
+    expect(ctx.subagents.hasPendingChildren(parent)).toBe(true)
     expect(child.inbox.remove(parked.id)).toBe(true)
     await waitNoActivation(ctx, started.childId)
   })

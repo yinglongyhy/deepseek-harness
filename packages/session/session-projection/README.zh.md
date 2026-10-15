@@ -53,6 +53,8 @@ const definition = {
 
 `init(header, inheritedEventCount)` 同时接收轻量元数据与精确的 fork 继承切点；它不得从 `firstLiveSeq` 或 `session/end-seed` 推断该切点。`apply` 必须同步，且对与单元无关的事件必须返回同一个状态引用——引用不变意味着零下游工作。注册表用 `Object.is` 比较相邻的 `wire.view` 原始结果；对象或数组 view 若要在仅内部 state 变化时抑制发布，就必须复用引用，结构相同的新对象仍算变化。携带状态的日志事件必须携带变更后的完整状态，绝不携带裸增量。
 
+`wire.publish(session, event)` 可选择否决实时变更流中的一次视图变化。它只在已提交事件驱动时同步执行，读取、历史回放与检查点恢复不会调用。返回 false 会丢弃该次变更，不会延迟投递、修改缓存状态或视图，也不会回滚水位。后续读取仍返回纯历史值。仅将其用于资格依赖运行时所有者的实时提醒；状态同步投影应省略它。
+
 ### 注册与读取
 
 `register(definition)` 安装单元；具有相同 key 和 `stateVersion` 的注册方共享其 cell，版本不兼容或 `stateVersion` 非法时会 throw。注册是挂在调用方 fiber 上的 effect，因此最后一个注册方卸载后会移除 key 及其缓存 cell。返回的 disposer 可以 yield 到同一 fiber 上的复合 `ctx.effect()` 中，使单元在依赖它的清理完成前保持可用。载体用 `snapshot(session)` 对每个客户端可见单元读取一致的同步切面——`{ asOfSeq, values }`，其中 `asOfSeq` 是所有值共同反映到的最后一个事件的 seq——并用 `onChanged(listener)` 订阅逐变更通知。`stateOf(session, key)` 读取一个单元的实时只读 host 状态，不计算无关视图。

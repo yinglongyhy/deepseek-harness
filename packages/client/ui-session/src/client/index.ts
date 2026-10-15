@@ -287,6 +287,8 @@ export class UiSession extends Service {
   private readonly absent: BindingSource
   private readonly current: BindingSource
   private readonly pendingDomains: RuntimePendingDomain[] = []
+  private pendingInteractionsSnapshot: readonly SessionPendingInteractionBase[] = []
+  private readonly pendingInteractionListeners = new Set<() => void>()
   private pendingSnapshot: ReadonlyMap<SessionId, SessionPendingInteractionBase> = new Map()
   private readonly running = new Map<SessionId, boolean>()
   private readonly completionUnread = new Set<SessionId>()
@@ -295,6 +297,14 @@ export class UiSession extends Service {
   private mainRetainId: SessionId | undefined
   private disposeMainRetain = (): void => {}
   private active = true
+  /** Complete pending-interaction list, independent of status precedence. */
+  readonly pendingInteractions: HostObservable<readonly SessionPendingInteractionBase[]> = {
+    getSnapshot: () => this.pendingInteractionsSnapshot,
+    subscribe: (listener) => {
+      this.pendingInteractionListeners.add(listener)
+      return () => { this.pendingInteractionListeners.delete(listener) }
+    },
+  }
   /** Root source combining running, pending-interaction, and completion-reminder facts. */
   readonly sessionStatus: HostObservable<SessionStatusSnapshot> = {
     getSnapshot: () => this.statusSnapshot,
@@ -466,6 +476,11 @@ export class UiSession extends Service {
   }
 
   private publishPendingInteractions(): void {
+    const complete = this.pendingDomains.flatMap(domain => domain.valuesSnapshot())
+    if (!samePendingInteractionList(this.pendingInteractionsSnapshot, complete)) {
+      this.pendingInteractionsSnapshot = complete
+      notifySubscribers(this.pendingInteractionListeners, '[ui-session] pending interactions')
+    }
     const next = new Map<SessionId, {
       interaction: SessionPendingInteractionBase
       precedence: number
@@ -707,6 +722,13 @@ function sameSessionStatus(left: SessionStatusSnapshot, right: SessionStatusSnap
       || candidate.completionUnread !== status.completionUnread) return false
   }
   return true
+}
+
+function samePendingInteractionList(
+  left: readonly SessionPendingInteractionBase[],
+  right: readonly SessionPendingInteractionBase[],
+): boolean {
+  return left.length === right.length && left.every((interaction, index) => interaction === right[index])
 }
 
 function samePendingInteractions(

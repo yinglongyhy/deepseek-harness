@@ -3,6 +3,7 @@
 import type { DesktopKeyboardApi, DesktopShortcutsApi } from '@deepseek-ai/dsh-client-shortcuts/protocol'
 import type { IpcMainInvokeEvent } from 'electron'
 import type { DesktopBrowserBridge } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
+import type { DesktopNotificationBridge } from '@deepseek-ai/dsh-client-interaction-notifications/types'
 
 /** IPC channel names kept private to the desktop application bundle. */
 export const DESKTOP_IPC = {
@@ -27,6 +28,10 @@ export const DESKTOP_IPC = {
   updatesStatus: 'dsh-desktop:updates-status',
   updatesOpen: 'dsh-desktop:updates-open',
   updatesPresentation: 'dsh-desktop:updates-presentation',
+  interactionNotificationShow: 'dsh-desktop:interaction-notification-show',
+  interactionNotificationClose: 'dsh-desktop:interaction-notification-close',
+  interactionNotificationStatus: 'dsh-desktop:interaction-notification-status',
+  interactionNotificationEvent: 'dsh-desktop:interaction-notification-event',
   nativeThemeSet: 'dsh-desktop:native-theme-set',
   windowFullscreen: 'dsh-desktop:window-fullscreen',
   windowsAppearance: 'dsh-desktop:windows-appearance',
@@ -84,6 +89,7 @@ export interface DshDesktopProductApi {
     open(): Promise<void>
     subscribe(listener: (state: DesktopUpdatePresentation) => void): () => void
   }
+  readonly notifications: DesktopNotificationBridge
 }
 
 /** Scheme of Desktop-owned application documents. */
