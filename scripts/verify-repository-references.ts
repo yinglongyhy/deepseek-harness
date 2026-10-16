@@ -49,7 +49,12 @@ export function findRepositoryReferences(
     if (organizationUrl.test(canonicalReferenceText(line).replace(kitRepositoryUrl, ''))) {
       references.push({ file, line: index + 1, kind: 'organization-url' })
     }
-    if ([...line.matchAll(commitCandidate)].some(match => commits.has(match[0].toLowerCase()))) {
+    if ([...line.matchAll(commitCandidate)].some((match) => {
+      const isPackageSize = /(?:^|\/)uv\.lock$/.test(file)
+        && /\bsize\s*=\s*$/.test(line.slice(0, match.index))
+        && /^\d+$/.test(match[0])
+      return !isPackageSize && commits.has(match[0].toLowerCase())
+    })) {
       references.push({ file, line: index + 1, kind: 'commit-hash' })
     }
   }

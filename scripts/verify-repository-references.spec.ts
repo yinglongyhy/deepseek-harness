@@ -81,6 +81,20 @@ describe('maintained repository reference policy', () => {
     }
   })
 
+  it('ignores only uv.lock package sizes and still rejects commit identifiers', () => {
+    const size = ['634', '4383'].join('')
+    const commit = 'a'.repeat(40)
+    expect(findRepositoryReferences('python/sdk/uv.lock', `size = ${size}`, new Set([size]))).toEqual([])
+    expect(findRepositoryReferences('source.md', `size = ${size}`, new Set([size]))).toEqual([
+      { file: 'source.md', line: 1, kind: 'commit-hash' },
+    ])
+    expect(findRepositoryReferences('uv.lock', `other = ${size}`, new Set([size]))).toEqual([
+      { file: 'uv.lock', line: 1, kind: 'commit-hash' },
+    ])
+    expect(findRepositoryReferences('nested/uv.lock', `size = ${size}, commit = ${commit}`, new Set([size, commit])))
+      .toEqual([{ file: 'nested/uv.lock', line: 1, kind: 'commit-hash' }])
+  })
+
   it('rejects complete and abbreviated commit identifiers in tracked, staged, and new files', (test) => {
     const fixture = repository(test)
     fixture.write('tracked.md', `release\n${fixture.commit}\n${fixture.commit.toUpperCase()}\n`)
